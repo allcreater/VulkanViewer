@@ -8,7 +8,7 @@ module;
 
 export module engine : vulkan.sdl;
 
-import :vulkan;
+import :vulkan.context;
 
 export std::vector<const char*> getRequiredExtensions() {
 	std::vector<const char*> result;
@@ -40,24 +40,14 @@ public:
 	}
 
 
-	vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities) const override {
-		if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
-			return capabilities.currentExtent;
-		}
-		else {
-			int width, height;
-			SDL_Vulkan_GetDrawableSize(window, &width, &height);
+	vk::Extent2D getExtent() const override {
+		int width, height;
+		SDL_Vulkan_GetDrawableSize(window, &width, &height);
 
-			vk::Extent2D actualExtent = {
-				static_cast<uint32_t>(width),
-				static_cast<uint32_t>(height),
-			};
-
-			actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
-			actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
-
-			return actualExtent;
-		}
+		return {
+			static_cast<uint32_t>(width),
+			static_cast<uint32_t>(height),
+		};
 	}
 
 private:

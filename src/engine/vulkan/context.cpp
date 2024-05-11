@@ -10,7 +10,7 @@ module;
 
 #include <vulkan/vulkan_raii.hpp>
 
-export module engine : vulkan;
+export module engine : vulkan.context;
 
 import :utils;
 
@@ -24,24 +24,39 @@ public:
 
 	virtual~IWindowingSystem() = default;
 	virtual vk::raii::SurfaceKHR createSurface(const vk::raii::Instance& instance) const = 0;
-	virtual vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capabilities) const = 0;
+	virtual vk::Extent2D getExtent() const = 0;
 };
 
 
 class VulkanContext;
 
-export class VulkanGraphicsContext {
+struct SwapchainData {
+	vk::raii::SwapchainKHR swapchain;
+	vk::SurfaceFormatKHR surfaceFormat;
+	std::vector<vk::raii::ImageView> imageViews;
+};
+
+export class VulkanGraphicsContext final {
 public:
 	explicit VulkanGraphicsContext(std::unique_ptr<IWindowingSystem> windowingSystem, const VulkanContext& context);
 
+	const IWindowingSystem& getWindowingSystem() const { return *windowingSystem;  }
+	const VulkanContext& getContext() const { return context; }
+	const vk::raii::Device& getDevice() const { return device; }
+
+	vk::Extent2D getExtent() const;
+	vk::SurfaceFormatKHR getSurfaceFormat() const { return swapchain.surfaceFormat; }
 private:
+	std::unique_ptr<IWindowingSystem> windowingSystem;
+	const VulkanContext& context;
 	vk::raii::SurfaceKHR surface;
 	vk::raii::Device device;
-	vk::raii::SwapchainKHR swapchain; 
+	SwapchainData swapchain;
 };
 
 
-export class VulkanContext {
+
+export class VulkanContext final {
 public:
 	explicit VulkanContext(std::span<const char*> requiredExtensions);
 	VulkanGraphicsContext makeGraphicsContext(std::unique_ptr<IWindowingSystem> windowingSystem);
@@ -210,7 +225,18 @@ vk::SurfaceFormatKHR selectSurfaceFormat(const vk::PhysicalDevice& physicalDevic
 	return formats[0];
 }
 
-vk::raii::SwapchainKHR createSwapchain(const vk::PhysicalDevice& physicalDevice, const vk::raii::Device& device, const vk::SurfaceKHR& surface, const IWindowingSystem& windowingSystem) {
+vk::Extent2D chooseExtent(const vk::SurfaceCapabilitiesKHR& capabilities, vk::Extent2D actualExtent) {
+	if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+		return capabilities.currentExtent;
+	}
+
+	actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+	actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+
+	return actualExtent;
+}
+
+SwapchainData createSwapchain(const vk::PhysicalDevice& physicalDevice, const vk::raii::Device& device, const vk::SurfaceKHR& surface, const IWindowingSystem& windowingSystem) {
 	
 	const auto capabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface);
 	const auto surfaceFormat = selectSurfaceFormat(physicalDevice, surface);
@@ -221,7 +247,7 @@ vk::raii::SwapchainKHR createSwapchain(const vk::PhysicalDevice& physicalDevice,
 		.minImageCount = capabilities.maxImageCount > 0 ? std::min(capabilities.minImageCount + 1, capabilities.maxImageCount) : capabilities.minImageCount + 1,
 		.imageFormat = surfaceFormat.format,
 		.imageColorSpace = surfaceFormat.colorSpace,
-		.imageExtent = windowingSystem.chooseSwapExtent(capabilities),
+		.imageExtent = chooseExtent(capabilities, windowingSystem.getExtent()),
 		.imageArrayLayers = 1,
 		.imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
 		.imageSharingMode = vk::SharingMode::eExclusive,
@@ -240,24 +266,59 @@ vk::raii::SwapchainKHR createSwapchain(const vk::PhysicalDevice& physicalDevice,
 		createInfo.pQueueFamilyIndices = queueFamilyIndices.data();
 	}
 
-	return device.createSwapchainKHR(createInfo);
+	auto swapchain = device.createSwapchainKHR(createInfo);
+
+	const auto makeView = [&device, surfaceFormat](vk::Image image) {
+		const vk::ImageViewCreateInfo createInfo{
+			.flags = {},
+			.image = image,
+			.viewType = vk::ImageViewType::e2D,
+			.format = surfaceFormat.format,
+			.components = {},
+			.subresourceRange = vk::ImageSubresourceRange{
+				.aspectMask = vk::ImageAspectFlagBits::eColor,
+				.baseMipLevel = 0,
+				.levelCount = 1,
+				.baseArrayLayer = 0,
+				.layerCount = 1,
+			},
+		};
+
+		return device.createImageView(createInfo);
+	};
+
+	auto imageViews = swapchain.getImages() | std::views::transform(makeView) | std::ranges::to<std::vector>();
+
+	return SwapchainData{
+		.swapchain = std::move(swapchain),
+		.surfaceFormat = surfaceFormat,
+		.imageViews = std::move(imageViews),
+	};
 }
 
 } // end namespace
 
-VulkanGraphicsContext::VulkanGraphicsContext(std::unique_ptr<IWindowingSystem> windowingSystem, const VulkanContext& context)
-	: surface{ std::move(windowingSystem->createSurface(context.getInstance())) }
+VulkanGraphicsContext::VulkanGraphicsContext(std::unique_ptr<IWindowingSystem> _windowingSystem, const VulkanContext& context)
+	: windowingSystem{ std::move(_windowingSystem) }
+	, context{context}
+	, surface{ windowingSystem->createSurface(context.getInstance()) }
 	, device{ CreateDevice(context.getPhysicalDevice(), surface)}
 	, swapchain{ createSwapchain(context.getPhysicalDevice(), device, surface, *windowingSystem)}
 {
-	auto images = swapchain.getImages();
+
 }
+
+vk::Extent2D VulkanGraphicsContext::getExtent() const {
+	const auto capabilities = context.getPhysicalDevice().getSurfaceCapabilitiesKHR(surface);
+	return chooseExtent(capabilities, windowingSystem->getExtent());
+}
+
 
 VulkanContext::VulkanContext(std::span<const char*> requiredExtensions)
 	: instance{ MakeInstance(context, requiredExtensions)}
 	, physicalDevice { GetAppropriatePhysicalDevice(instance)}
 {
-	std::print(std::cout, "Selected device {}", static_cast<std::string_view>(physicalDevice.getProperties().deviceName));
+	std::println(std::cout, "Selected device {}", static_cast<std::string_view>(physicalDevice.getProperties().deviceName));
 }
 
 VulkanGraphicsContext VulkanContext::makeGraphicsContext(std::unique_ptr<IWindowingSystem> windowingSystem) {

@@ -53,6 +53,7 @@ target_sources(engine
             BASE_DIRS
             FILES
                 "vulkan/context.cpp"
+                "vulkan/renderer.cpp"
                 "vulkan/sdl_context.cpp"
                 "engine.ixx"
                 "utils.cpp"

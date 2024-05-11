@@ -5,6 +5,8 @@ export module engine;
 
 export class IEngine {
 public:
+	virtual void Render() = 0;
+
 	virtual ~IEngine() = default;
 };
 
