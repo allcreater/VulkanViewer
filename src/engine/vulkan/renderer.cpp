@@ -16,6 +16,19 @@ export module engine : vulkan.renderer;
 import :utils;
 import :vulkan.context;
 
+
+struct Synchronization {
+	explicit Synchronization(const vk::raii::Device& device)
+		: imageAvailable{ device, vk::SemaphoreCreateInfo{} }
+		, rederFinished{ device, vk::SemaphoreCreateInfo{} }
+		, inFlightFence{ device, {.flags = vk::FenceCreateFlagBits::eSignaled} }
+	{}
+
+	vk::raii::Semaphore imageAvailable;
+	vk::raii::Semaphore rederFinished;
+	vk::raii::Fence inFlightFence;
+};
+
 export class VulkanRenderer final {
 public:
 	VulkanRenderer(VulkanGraphicsContext&& graphicsContext);
@@ -28,6 +41,10 @@ private:
 	vk::raii::PipelineLayout pipelineLayout{ nullptr };
 	vk::raii::RenderPass renderPass{ nullptr };
 	vk::raii::Pipeline trianglePipeline{nullptr};
+	std::vector<vk::raii::Framebuffer> framebuffers;
+	//vk::raii::CommandPool commandPool;
+	//vk::raii::CommandBuffer commandBuffer;
+	Synchronization sync;
 };
 
 namespace {
@@ -50,6 +67,7 @@ vk::raii::ShaderModule loadShaderModule(const vk::raii::Device& device, const st
 
 VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 	: graphicsContext{std::move(_graphicsContext)}
+	, sync { graphicsContext.getDevice() }
 {
 	const auto& device = graphicsContext.getDevice();
 
@@ -231,14 +249,26 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 		}
 	};
 
+	const std::array<vk::SubpassDependency, 1> dependencies{
+		vk::SubpassDependency{
+			.srcSubpass      = vk::SubpassExternal,
+			.dstSubpass      = 0,
+			.srcStageMask    = vk::PipelineStageFlagBits::eColorAttachmentOutput,
+			.dstStageMask    = vk::PipelineStageFlagBits::eColorAttachmentOutput,
+			.srcAccessMask   = {},
+			.dstAccessMask   = vk::AccessFlagBits::eColorAttachmentWrite,
+			.dependencyFlags = {},
+		},
+	};
+
 	const vk::RenderPassCreateInfo renderPassCreateInfo{
 		.flags           = {},
 		.attachmentCount = static_cast<uint32_t>(attachmentDescriptions.size()),
 		.pAttachments    = attachmentDescriptions.data(),
 		.subpassCount    = static_cast<uint32_t>(subpassDescriptions.size()),
 		.pSubpasses      = subpassDescriptions.data(),
-		.dependencyCount = 0,
-		.pDependencies   = nullptr,
+		.dependencyCount = static_cast<uint32_t>(dependencies.size()),
+		.pDependencies   = dependencies.data(),
 	};
 
 	renderPass = device.createRenderPass(renderPassCreateInfo);
@@ -264,8 +294,108 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 	};
 
 	trianglePipeline = device.createGraphicsPipeline({nullptr}, create_info);
+
+
+
+	// framebuffers
+	const auto makeFramebuffer = [renderPass = *renderPass, swapChainExtent, &device](vk::ImageView imageView) {
+		const vk::FramebufferCreateInfo createInfo{
+			.flags = {},
+			.renderPass = renderPass,
+			.attachmentCount = 1,
+			.pAttachments = &imageView,
+			.width = swapChainExtent.width,
+			.height = swapChainExtent.height,
+			.layers = 1,
+		};
+
+		return device.createFramebuffer(createInfo);
+	};
+
+	framebuffers = graphicsContext.getSwapchainData().imageViews | std::views::transform(makeFramebuffer) | std::ranges::to<std::vector>();
+
 }
 
 void VulkanRenderer::Render() {
+	const vk::raii::Device& device = graphicsContext.getDevice();
+	const vk::raii::CommandBuffer& commandBuffer = graphicsContext.getCommandBuffer();
+	const auto swapChainExtent = graphicsContext.getExtent();
+
+	device.waitForFences(std::array{ *sync.inFlightFence }, vk::True, std::numeric_limits<uint64_t>::max());
+	device.resetFences(std::array{ *sync.inFlightFence });
+
+	const vk::raii::SwapchainKHR& swapchain = graphicsContext.getSwapchainData().swapchain;
+	const auto [success, frameImageIndex] = swapchain.acquireNextImage(std::numeric_limits<uint64_t>::max(), sync.imageAvailable, nullptr);
+
+	commandBuffer.reset();
+	{
+		commandBuffer.begin({});
+
+		commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, trianglePipeline);
+
+		const std::array<vk::ClearValue, 1> clearValues = {
+			vk::ClearValue{vk::ClearColorValue{1.0f, 1.0f, 0.0f, 1.0f}},
+		};
+		const vk::RenderPassBeginInfo renderPassBeginInfo{
+			.renderPass = renderPass,
+			.framebuffer = framebuffers[frameImageIndex],
+			.renderArea = {.offset = {}, .extent = swapChainExtent },
+			.clearValueCount = static_cast<uint32_t>(clearValues.size()),
+			.pClearValues = clearValues.data(),
+		};
+		commandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+
+		const std::array<vk::Viewport, 1> viewports{
+			vk::Viewport{
+				.x = 0.0f,
+				.y = 0.0f,
+				.width = (float)swapChainExtent.width,
+				.height = (float)swapChainExtent.height,
+				.minDepth = 0.0f,
+				.maxDepth = 1.0f,
+			},
+		};
+		commandBuffer.setViewport(0, viewports);
+
+
+		const std::array<vk::Rect2D, 1> scissorRects{
+			vk::Rect2D {
+				.offset = {0, 0},
+				.extent = swapChainExtent,
+			},
+		};
+		commandBuffer.setScissor(0, scissorRects);
+
+		commandBuffer.draw(3, 1, 0, 0);
+
+		commandBuffer.endRenderPass();
+		commandBuffer.end();
+	}
+
+	const std::array<vk::Semaphore, 1> semaphoresForWait = { sync.imageAvailable };
+	const std::array<vk::Semaphore, 1> semaphoresForSignal = { sync.rederFinished };
+	const std::array<vk::PipelineStageFlags, 1> waitStages = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
+	const vk::SubmitInfo submitInfo{
+		.waitSemaphoreCount   = static_cast<uint32_t>(semaphoresForWait.size()),
+		.pWaitSemaphores      = semaphoresForWait.data(),
+		.pWaitDstStageMask    = waitStages.data(),
+		.commandBufferCount   = 1,
+		.pCommandBuffers      = &*commandBuffer,
+		.signalSemaphoreCount = static_cast<uint32_t>(semaphoresForSignal.size()),
+		.pSignalSemaphores    = semaphoresForSignal.data(),
+	};
+
+	graphicsContext.getGraphicsQueue().submit(submitInfo, sync.inFlightFence);
+
+	const vk::PresentInfoKHR presentInfo{
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores    = &*sync.rederFinished,
+		.swapchainCount     = 1,
+		.pSwapchains        = &*swapchain,
+		.pImageIndices      = &frameImageIndex,
+		.pResults           = nullptr,
+	};
+
+	graphicsContext.getPresentQueue().presentKHR(presentInfo);
 
 }

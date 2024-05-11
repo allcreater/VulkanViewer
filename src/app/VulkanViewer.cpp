@@ -24,7 +24,7 @@ public:
                     run = false;
 
             }
-
+            engine->Render();
             //SDL_Delay(1);
         }
 	}

@@ -21,9 +21,11 @@ target_sources( VulkanHppModule PRIVATE
   FILES ${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm
 )
 
-target_compile_definitions(VulkanHppModule PUBLIC 
-    #VULKAN_HPP_NO_SMART_HANDLE
-    #VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
+target_compile_definitions(VulkanHppModule
+    PRIVATE 
+        VULKAN_HPP_NO_SMART_HANDLE
+    PUBLIC
+        VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
 )
 
 target_compile_features( VulkanHppModule PUBLIC cxx_std_23 )
@@ -53,6 +55,7 @@ target_sources(engine
             BASE_DIRS
             FILES
                 "vulkan/context.cpp"
+                "vulkan/framebuffer.cpp"
                 "vulkan/renderer.cpp"
                 "vulkan/sdl_context.cpp"
                 "engine.ixx"

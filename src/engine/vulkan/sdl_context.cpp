@@ -19,8 +19,6 @@ export std::vector<const char*> getRequiredExtensions() {
 	result.resize(array_size);
 	SDL_Vulkan_GetInstanceExtensions(nullptr, &array_size, result.data());
 
-	std::span a = result;
-
 	return result;
 }
 

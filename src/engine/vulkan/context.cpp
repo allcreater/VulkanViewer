@@ -33,6 +33,7 @@ class VulkanContext;
 struct SwapchainData {
 	vk::raii::SwapchainKHR swapchain;
 	vk::SurfaceFormatKHR surfaceFormat;
+	//std::vector<vk::raii::Image> images;
 	std::vector<vk::raii::ImageView> imageViews;
 };
 
@@ -43,15 +44,26 @@ public:
 	const IWindowingSystem& getWindowingSystem() const { return *windowingSystem;  }
 	const VulkanContext& getContext() const { return context; }
 	const vk::raii::Device& getDevice() const { return device; }
+	const vk::raii::CommandBuffer& getCommandBuffer() const { return commandBuffer; }
 
 	vk::Extent2D getExtent() const;
 	vk::SurfaceFormatKHR getSurfaceFormat() const { return swapchain.surfaceFormat; }
+	const SwapchainData& getSwapchainData() const { return swapchain; }
+
+	const vk::raii::Queue& getGraphicsQueue() const { return graphicsQueue; }
+	const vk::raii::Queue& getPresentQueue() const { return presentQueue; }
+
+
 private:
 	std::unique_ptr<IWindowingSystem> windowingSystem;
 	const VulkanContext& context;
 	vk::raii::SurfaceKHR surface;
+	std::array<uint32_t, 2> graphicsAndPresentQueueFamilyIndices;
 	vk::raii::Device device;
+	vk::raii::Queue graphicsQueue, presentQueue;
 	SwapchainData swapchain;
+	vk::raii::CommandPool commandPool;
+	vk::raii::CommandBuffer commandBuffer;
 };
 
 
@@ -236,7 +248,7 @@ vk::Extent2D chooseExtent(const vk::SurfaceCapabilitiesKHR& capabilities, vk::Ex
 	return actualExtent;
 }
 
-SwapchainData createSwapchain(const vk::PhysicalDevice& physicalDevice, const vk::raii::Device& device, const vk::SurfaceKHR& surface, const IWindowingSystem& windowingSystem) {
+SwapchainData createSwapchain(const vk::PhysicalDevice& physicalDevice, const vk::raii::Device& device, const vk::SurfaceKHR& surface, const IWindowingSystem& windowingSystem, const std::array<uint32_t, 2>& graphicsAndPresentQueueFamilyIndices) {
 	
 	const auto capabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface);
 	const auto surfaceFormat = selectSurfaceFormat(physicalDevice, surface);
@@ -259,11 +271,10 @@ SwapchainData createSwapchain(const vk::PhysicalDevice& physicalDevice, const vk
 		.clipped = {},
 	};
 
-	const auto queueFamilyIndices = findGraphicsAndPresentQueueFamilyIndex(physicalDevice, surface);
-	if (queueFamilyIndices[0] != queueFamilyIndices[1]) {
+	if (graphicsAndPresentQueueFamilyIndices[0] != graphicsAndPresentQueueFamilyIndices[1]) {
 		createInfo.imageSharingMode = vk::SharingMode::eConcurrent;
 		createInfo.queueFamilyIndexCount = 2;
-		createInfo.pQueueFamilyIndices = queueFamilyIndices.data();
+		createInfo.pQueueFamilyIndices = graphicsAndPresentQueueFamilyIndices.data();
 	}
 
 	auto swapchain = device.createSwapchainKHR(createInfo);
@@ -296,14 +307,39 @@ SwapchainData createSwapchain(const vk::PhysicalDevice& physicalDevice, const vk
 	};
 }
 
+vk::raii::CommandPool createCommandPool (const vk::raii::Device& device, const std::array<uint32_t, 2>& graphicsAndPresentQueueFamilyIndices) {
+	//command pool
+	const vk::CommandPoolCreateInfo createInfo{
+		.flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+		.queueFamilyIndex = graphicsAndPresentQueueFamilyIndices[0],
+	};
+
+	return device.createCommandPool(createInfo);
+}
+
+vk::raii::CommandBuffer createCommandBuffer(const vk::raii::Device& device, vk::CommandPool commandPool) {
+	const vk::CommandBufferAllocateInfo allocateInfo{
+		.commandPool        = commandPool,
+		.level              = vk::CommandBufferLevel::ePrimary,
+		.commandBufferCount = 1,
+	};
+
+	return std::move(device.allocateCommandBuffers(allocateInfo)[0]);
+}
+
 } // end namespace
 
 VulkanGraphicsContext::VulkanGraphicsContext(std::unique_ptr<IWindowingSystem> _windowingSystem, const VulkanContext& context)
 	: windowingSystem{ std::move(_windowingSystem) }
 	, context{context}
 	, surface{ windowingSystem->createSurface(context.getInstance()) }
+	, graphicsAndPresentQueueFamilyIndices{ findGraphicsAndPresentQueueFamilyIndex(context.getPhysicalDevice(), surface) }
 	, device{ CreateDevice(context.getPhysicalDevice(), surface)}
-	, swapchain{ createSwapchain(context.getPhysicalDevice(), device, surface, *windowingSystem)}
+	, graphicsQueue{device, graphicsAndPresentQueueFamilyIndices[0], 0}
+	, presentQueue{device, graphicsAndPresentQueueFamilyIndices[1], 0}
+	, swapchain{ createSwapchain(context.getPhysicalDevice(), device, surface, *windowingSystem, graphicsAndPresentQueueFamilyIndices)}
+	, commandPool{ createCommandPool(device, graphicsAndPresentQueueFamilyIndices)}
+	, commandBuffer { createCommandBuffer(device, commandPool)}
 {
 
 }

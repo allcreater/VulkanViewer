@@ -22,7 +22,7 @@ public:
 	}
 
 	void Render() override {
-
+		renderer.Render();
 	}
 
 private:
