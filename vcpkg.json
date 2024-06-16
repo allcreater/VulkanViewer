@@ -3,7 +3,7 @@
   "version-string": "0.0.1",
   "dependencies": [
     "glm",
-    "vulkan-hpp",
+    "vulkan-headers",
     {
       "name":  "sdl2",
       "features": [ "vulkan" ]

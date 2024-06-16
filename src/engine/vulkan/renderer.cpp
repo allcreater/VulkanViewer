@@ -32,6 +32,7 @@ struct Synchronization {
 export class VulkanRenderer final {
 public:
 	VulkanRenderer(VulkanGraphicsContext&& graphicsContext);
+	~VulkanRenderer();
 
 	void Render();
 
@@ -223,7 +224,7 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 			.stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
 			.stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
 			.initialLayout = vk::ImageLayout::eUndefined,
-			.finalLayout = vk::ImageLayout::eColorAttachmentOptimal,
+			.finalLayout = vk::ImageLayout::ePresentSrcKHR,
 		},
 	};
 	
@@ -314,6 +315,11 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 
 	framebuffers = graphicsContext.getSwapchainData().imageViews | std::views::transform(makeFramebuffer) | std::ranges::to<std::vector>();
 
+}
+
+VulkanRenderer::~VulkanRenderer() {
+	const vk::raii::Device& device = graphicsContext.getDevice();
+	device.waitIdle();
 }
 
 void VulkanRenderer::Render() {
