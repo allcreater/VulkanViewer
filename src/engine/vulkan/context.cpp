@@ -44,7 +44,7 @@ public:
 	const IWindowingSystem& getWindowingSystem() const { return *windowingSystem;  }
 	const VulkanContext& getContext() const { return context; }
 	const vk::raii::Device& getDevice() const { return device; }
-	const vk::raii::CommandBuffer& getCommandBuffer() const { return commandBuffer; }
+	std::vector<vk::raii::CommandBuffer> createCommandBuffers(uint32_t count) const;
 
 	vk::Extent2D getExtent() const;
 	vk::SurfaceFormatKHR getSurfaceFormat() const { return swapchain.surfaceFormat; }
@@ -63,7 +63,6 @@ private:
 	vk::raii::Queue graphicsQueue, presentQueue;
 	SwapchainData swapchain;
 	vk::raii::CommandPool commandPool;
-	vk::raii::CommandBuffer commandBuffer;
 };
 
 
@@ -317,16 +316,6 @@ vk::raii::CommandPool createCommandPool (const vk::raii::Device& device, const s
 	return device.createCommandPool(createInfo);
 }
 
-vk::raii::CommandBuffer createCommandBuffer(const vk::raii::Device& device, vk::CommandPool commandPool) {
-	const vk::CommandBufferAllocateInfo allocateInfo{
-		.commandPool        = commandPool,
-		.level              = vk::CommandBufferLevel::ePrimary,
-		.commandBufferCount = 1,
-	};
-
-	return std::move(device.allocateCommandBuffers(allocateInfo)[0]);
-}
-
 } // end namespace
 
 VulkanGraphicsContext::VulkanGraphicsContext(std::unique_ptr<IWindowingSystem> _windowingSystem, const VulkanContext& context)
@@ -339,9 +328,19 @@ VulkanGraphicsContext::VulkanGraphicsContext(std::unique_ptr<IWindowingSystem> _
 	, presentQueue{device, graphicsAndPresentQueueFamilyIndices[1], 0}
 	, swapchain{ createSwapchain(context.getPhysicalDevice(), device, surface, *windowingSystem, graphicsAndPresentQueueFamilyIndices)}
 	, commandPool{ createCommandPool(device, graphicsAndPresentQueueFamilyIndices)}
-	, commandBuffer { createCommandBuffer(device, commandPool)}
 {
 
+}
+
+std::vector<vk::raii::CommandBuffer> VulkanGraphicsContext::createCommandBuffers(uint32_t count) const
+{
+	const vk::CommandBufferAllocateInfo allocateInfo{
+		.commandPool = commandPool,
+		.level = vk::CommandBufferLevel::ePrimary,
+		.commandBufferCount = count,
+	};
+
+	return device.allocateCommandBuffers(allocateInfo);
 }
 
 vk::Extent2D VulkanGraphicsContext::getExtent() const {

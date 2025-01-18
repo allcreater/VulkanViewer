@@ -37,6 +37,8 @@ public:
 	void Render();
 
 private:
+	constexpr static int num_inflight_frames = 2;
+
 	VulkanGraphicsContext graphicsContext;
 	vk::raii::ShaderModule vs{ nullptr }, fs{ nullptr };
 	vk::raii::PipelineLayout pipelineLayout{ nullptr };
@@ -44,8 +46,9 @@ private:
 	vk::raii::Pipeline trianglePipeline{nullptr};
 	std::vector<vk::raii::Framebuffer> framebuffers;
 	//vk::raii::CommandPool commandPool;
-	//vk::raii::CommandBuffer commandBuffer;
-	Synchronization sync;
+	std::vector<vk::raii::CommandBuffer> commandBuffers;
+	std::vector<Synchronization> sync;
+	uint32_t currentFrame = 0;
 };
 
 namespace {
@@ -68,8 +71,9 @@ vk::raii::ShaderModule loadShaderModule(const vk::raii::Device& device, const st
 
 VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 	: graphicsContext{std::move(_graphicsContext)}
-	, sync { graphicsContext.getDevice() }
 {
+	sync = std::views::iota(0, num_inflight_frames) | std::views::transform([&](auto _) { return Synchronization{ graphicsContext.getDevice() }; }) | std::ranges::to<std::vector>();
+
 	const auto& device = graphicsContext.getDevice();
 
 	vs = loadShaderModule(device, "data/shaders/hello_world.vs.spv");
@@ -315,6 +319,7 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 
 	framebuffers = graphicsContext.getSwapchainData().imageViews | std::views::transform(makeFramebuffer) | std::ranges::to<std::vector>();
 
+	commandBuffers = graphicsContext.createCommandBuffers(num_inflight_frames);
 }
 
 VulkanRenderer::~VulkanRenderer() {
@@ -324,14 +329,15 @@ VulkanRenderer::~VulkanRenderer() {
 
 void VulkanRenderer::Render() {
 	const vk::raii::Device& device = graphicsContext.getDevice();
-	const vk::raii::CommandBuffer& commandBuffer = graphicsContext.getCommandBuffer();
+	const vk::raii::CommandBuffer& commandBuffer = commandBuffers[currentFrame];
 	const auto swapChainExtent = graphicsContext.getExtent();
+	const auto& frameSync = sync[currentFrame];
 
-	device.waitForFences(std::array{ *sync.inFlightFence }, vk::True, std::numeric_limits<uint64_t>::max());
-	device.resetFences(std::array{ *sync.inFlightFence });
+	device.waitForFences(std::array{ *frameSync.inFlightFence}, vk::True, std::numeric_limits<uint64_t>::max());
+	device.resetFences(std::array{ *frameSync.inFlightFence});
 
 	const vk::raii::SwapchainKHR& swapchain = graphicsContext.getSwapchainData().swapchain;
-	const auto [success, frameImageIndex] = swapchain.acquireNextImage(std::numeric_limits<uint64_t>::max(), sync.imageAvailable, nullptr);
+	const auto [success, frameImageIndex] = swapchain.acquireNextImage(std::numeric_limits<uint64_t>::max(), frameSync.imageAvailable, nullptr);
 
 	commandBuffer.reset();
 	{
@@ -378,8 +384,8 @@ void VulkanRenderer::Render() {
 		commandBuffer.end();
 	}
 
-	const std::array<vk::Semaphore, 1> semaphoresForWait = { sync.imageAvailable };
-	const std::array<vk::Semaphore, 1> semaphoresForSignal = { sync.rederFinished };
+	const std::array<vk::Semaphore, 1> semaphoresForWait = { frameSync.imageAvailable };
+	const std::array<vk::Semaphore, 1> semaphoresForSignal = { frameSync.rederFinished };
 	const std::array<vk::PipelineStageFlags, 1> waitStages = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
 	const vk::SubmitInfo submitInfo{
 		.waitSemaphoreCount   = static_cast<uint32_t>(semaphoresForWait.size()),
@@ -391,11 +397,11 @@ void VulkanRenderer::Render() {
 		.pSignalSemaphores    = semaphoresForSignal.data(),
 	};
 
-	graphicsContext.getGraphicsQueue().submit(submitInfo, sync.inFlightFence);
+	graphicsContext.getGraphicsQueue().submit(submitInfo, frameSync.inFlightFence);
 
 	const vk::PresentInfoKHR presentInfo{
 		.waitSemaphoreCount = 1,
-		.pWaitSemaphores    = &*sync.rederFinished,
+		.pWaitSemaphores    = &*frameSync.rederFinished,
 		.swapchainCount     = 1,
 		.pSwapchains        = &*swapchain,
 		.pImageIndices      = &frameImageIndex,
@@ -404,4 +410,5 @@ void VulkanRenderer::Render() {
 
 	graphicsContext.getPresentQueue().presentKHR(presentInfo);
 
+	currentFrame = (currentFrame + 1) % num_inflight_frames;
 }

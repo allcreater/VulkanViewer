@@ -34,7 +34,7 @@ target_link_libraries( VulkanHppModule PUBLIC Vulkan::Vulkan )
 #]]
 
 
-add_library(engine)
+add_library(engine STATIC)
 #target_link_libraries(engine PRIVATE VulkanHppModule )
 target_link_libraries(engine PRIVATE Vulkan::Vulkan SDL2::SDL2)
 target_compile_definitions(engine 
@@ -51,13 +51,16 @@ target_sources(engine
         FILE_SET headers TYPE HEADERS
             FILES 
                 
-        FILE_SET files TYPE CXX_MODULES 
-            BASE_DIRS
+        FILE_SET partitions TYPE CXX_MODULES
             FILES
                 "vulkan/context.cpp"
                 "vulkan/framebuffer.cpp"
                 "vulkan/renderer.cpp"
                 "vulkan/sdl_context.cpp"
+
+        FILE_SET files TYPE CXX_MODULES 
+            BASE_DIRS
+            FILES
                 "engine.ixx"
                 "utils.cpp"
 )

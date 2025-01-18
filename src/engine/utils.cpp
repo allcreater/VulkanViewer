@@ -27,6 +27,8 @@ auto intersectsFilter(Range&& anotherRange, Pr&& predicate = {}) {
 
 std::vector<char> readFile(std::filesystem::path path) {
 	std::basic_ifstream<char> stream{ path, std::ios::binary | std::ios::in | std::ios::ate };
+	stream.exceptions(std::ifstream::failbit);
+
 	const auto dataLength = [&stream]() {
 		auto pos = stream.tellg();
 		stream.seekg(std::ios::beg);
