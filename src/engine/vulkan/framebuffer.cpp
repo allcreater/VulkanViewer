@@ -1,16 +1,6 @@
-module;
-#include <algorithm>
-#include <numeric>
-#include <memory>
-#include <ranges>
-
-#include <functional>
-#include <iostream>
-#include <format>
-
-#include <vulkan/vulkan_raii.hpp>
-
 export module engine : vulkan.framebuffer;
+import vulkan_hpp;
+import std;
 
 export class Framebuffer {
 public:

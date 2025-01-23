@@ -1,17 +1,6 @@
-module;
-#include <algorithm>
-#include <numeric>
-#include <memory>
-#include <ranges>
-
-#include <functional>
-#include <iostream>
-#include <format>
-#include <filesystem>
-
-#include <vulkan/vulkan_raii.hpp>
-
 export module engine : vulkan.renderer;
+import vulkan_hpp;
+import std;
 
 import :utils;
 import :vulkan.context;
@@ -202,7 +191,7 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 	const vk::PipelineColorBlendStateCreateInfo colorBlendState{
 		.flags = {},
 		.logicOpEnable = {},
-		.logicOp = VULKAN_HPP_NAMESPACE::LogicOp::eClear,
+		.logicOp = vk::LogicOp::eClear,
 		.attachmentCount = static_cast<uint32_t>(colorBlendAttachments.size()),
 		.pAttachments = colorBlendAttachments.data(),
 		.blendConstants = std::array{0.0f, 0.0f, 0.0f, 0.0f},

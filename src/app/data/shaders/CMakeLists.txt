@@ -1,7 +1,7 @@
 # pretty dumb for now :)
 
 if (WIN32)
-    set(APP_GLSLC_COMMAND "%VULKAN_SDK%/bin/glslc.exe")
+    set(APP_GLSLC_COMMAND "%VULKAN_SDK%/bin/glslc.exe") # use target Vulkan::glslc ?
 endif()
 
 add_custom_target(

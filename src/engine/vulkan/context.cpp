@@ -1,16 +1,10 @@
 module;
-#include <algorithm>
-#include <numeric>
-#include <memory>
-#include <ranges>
-
-#include <functional>
-#include <iostream>
-#include <format>
-
-#include <vulkan/vulkan_raii.hpp>
+#include <cassert>
+#include <vulkan/vulkan_hpp_macros.hpp>
 
 export module engine : vulkan.context;
+import vulkan_hpp;
+import std;
 
 import :utils;
 
@@ -87,7 +81,7 @@ private:
 // Implementation
 namespace {
 
-std::vector<const char*> GetDesiredLayers() {
+std::vector<const char*> SelectLayers(const vk::raii::Context& context) {
 	std::vector<const char*> desiredLayers{
 #ifdef AT3_DEBUG
 		"VK_LAYER_KHRONOS_validation",
@@ -95,50 +89,49 @@ std::vector<const char*> GetDesiredLayers() {
 #endif
 	};
 
-	auto available_layers /*?*/ = vk::enumerateInstanceLayerProperties();
+	auto available_layers = context.enumerateInstanceLayerProperties();
 	std::erase_if(desiredLayers, [&available_layers](const char* desiredLayerName) {
 		return std::ranges::none_of(available_layers, [desiredLayerName](const auto& layerName) {return layerName == desiredLayerName; }, [](const vk::LayerProperties& props) { return static_cast<std::string_view>(props.layerName); });
-	});
-
+		});
+	
 	return desiredLayers;
 }
 
-vk::raii::Instance MakeInstance(const vk::raii::Context& context, std::span<const char*> requiredExtensions) {
+vk::raii::Instance MakeInstance(const vk::raii::Context& context, std::span<const char* const> requiredExtensions) {
+
 	constexpr vk::ApplicationInfo appInfo{
 		.pApplicationName = "TinyVulkan",
-		.applicationVersion = VK_MAKE_VERSION(0, 0, 1),
+		.applicationVersion = vk::makeVersion(0, 0, 1),
 		.pEngineName = "TinyVulkan",
-		.engineVersion = VK_MAKE_VERSION(0, 0, 1),
-		.apiVersion = VK_API_VERSION_1_3,
+		.engineVersion = vk::makeVersion(0, 0, 1),
+		.apiVersion = vk::ApiVersion13,
 	};
 
-	const auto desired_layers = GetDesiredLayers();
-//#ifdef AT3_DEBUG
-//	required_extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-//#endif
+	const auto desired_layers = SelectLayers(context);
+	//#ifdef AT3_DEBUG
+	//	required_extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	//#endif
 	vk::InstanceCreateInfo instance_create_info{
 		.pApplicationInfo = &appInfo,
-		.enabledLayerCount = static_cast<uint32_t>(desired_layers.size()),
+		.enabledLayerCount = static_cast<std::uint32_t>(desired_layers.size()),
 		.ppEnabledLayerNames = desired_layers.data(),
-		.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size()),
+		.enabledExtensionCount = static_cast<std::uint32_t>(requiredExtensions.size()),
 		.ppEnabledExtensionNames = requiredExtensions.data(),
 	};
 
-	
 	return context.createInstance(instance_create_info);
 }
 
-vk::raii::PhysicalDevice GetAppropriatePhysicalDevice(const vk::raii::Instance& instance)
-{
+vk::raii::PhysicalDevice GetAppropriatePhysicalDevice(const vk::raii::Instance& instance) {
 	auto devices = instance.enumeratePhysicalDevices();
 	if (devices.empty())
 		throw std::runtime_error("SelectPhysicalDevice: no physical devices O_o");
 
-	std::erase_if(devices, [](const vk::PhysicalDevice& device) {
+	std::erase_if(devices, [](const vk::raii::PhysicalDevice& device) {
 		const auto extensionProperties = device.enumerateDeviceExtensionProperties();
 		return std::ranges::none_of(
 			extensionProperties, [](const vk::ExtensionProperties& props) {
-				return static_cast<std::string_view>(props.extensionName) == VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+				return static_cast<std::string_view>(props.extensionName) == vk::KHRSwapchainExtensionName;
 			});
 
 		//device.getSurfaceSupportKHR
@@ -151,14 +144,14 @@ vk::raii::PhysicalDevice GetAppropriatePhysicalDevice(const vk::raii::Instance& 
 	if (devices.empty())
 		throw std::runtime_error("SelectPhysicalDevice: no physical devices with a swapchain");
 
-	const auto it = std::ranges::find_if(devices, [](const vk::PhysicalDevice& device) {
+	const auto it = std::ranges::find_if(devices, [](const vk::raii::PhysicalDevice& device) {
 		return device.getProperties().deviceType == vk::PhysicalDeviceType::eDiscreteGpu;
-	});
+		});
 
 	return it != devices.end() ? *it : devices.front();
 }
 
-std::array<uint32_t, 2> findGraphicsAndPresentQueueFamilyIndex(const vk::PhysicalDevice& physicalDevice, const vk::SurfaceKHR& surface)
+std::array<uint32_t, 2> findGraphicsAndPresentQueueFamilyIndex(const vk::raii::PhysicalDevice& physicalDevice, const vk::SurfaceKHR& surface)
 {
 	std::vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties();
 	assert(queueFamilyProperties.size() < std::numeric_limits<uint32_t>::max());
@@ -180,7 +173,7 @@ std::array<uint32_t, 2> findGraphicsAndPresentQueueFamilyIndex(const vk::Physica
 	throw std::runtime_error("Could not find queues for both graphics or present -> terminating");
 }
 
-vk::raii::Device CreateDevice(const vk::raii::PhysicalDevice& physicalDevice, const vk::SurfaceKHR& surface) {
+vk::raii::Device CreateDevice(const vk::raii::Context& context, const vk::raii::PhysicalDevice& physicalDevice, const vk::SurfaceKHR& surface) {
 	auto [graphicsQueueIndex, presentQueueIndex] = findGraphicsAndPresentQueueFamilyIndex(physicalDevice, surface);
 
 	constexpr std::array<float, 1> queue_priorities{ 1.0f };
@@ -199,10 +192,10 @@ vk::raii::Device CreateDevice(const vk::raii::PhysicalDevice& physicalDevice, co
 
 	vk::PhysicalDeviceFeatures deviceFeatures{};
 	constexpr std::array<const char*, 1> requiredDeviceExtensions{
-		VK_KHR_SWAPCHAIN_EXTENSION_NAME
+		vk::KHRSwapchainExtensionName
 	};
 
-	const auto desiredLayers = GetDesiredLayers();
+	const auto desiredLayers = SelectLayers(context);
 	vk::DeviceCreateInfo deviceCreateInfo{
 		.queueCreateInfoCount = (graphicsQueueIndex != presentQueueIndex) ? 2u : 1u, // static_cast<uint32_t>(queueCreateInfo.size()),
 		.pQueueCreateInfos = queueCreateInfo.data(),
@@ -216,7 +209,7 @@ vk::raii::Device CreateDevice(const vk::raii::PhysicalDevice& physicalDevice, co
 	return physicalDevice.createDevice(deviceCreateInfo);
 }
 
-vk::SurfaceFormatKHR selectSurfaceFormat(const vk::PhysicalDevice& physicalDevice, const vk::SurfaceKHR& surface) {
+vk::SurfaceFormatKHR selectSurfaceFormat(const vk::raii::PhysicalDevice& physicalDevice, const vk::SurfaceKHR& surface) {
 	constexpr std::array<vk::SurfaceFormatKHR, 2> desiredFormats{
 		vk::SurfaceFormatKHR{
 			.format = vk::Format::eB8G8R8A8Srgb, 
@@ -247,7 +240,7 @@ vk::Extent2D chooseExtent(const vk::SurfaceCapabilitiesKHR& capabilities, vk::Ex
 	return actualExtent;
 }
 
-SwapchainData createSwapchain(const vk::PhysicalDevice& physicalDevice, const vk::raii::Device& device, const vk::SurfaceKHR& surface, const IWindowingSystem& windowingSystem, const std::array<uint32_t, 2>& graphicsAndPresentQueueFamilyIndices) {
+SwapchainData createSwapchain(const vk::raii::PhysicalDevice& physicalDevice, const vk::raii::Device& device, const vk::SurfaceKHR& surface, const IWindowingSystem& windowingSystem, const std::array<uint32_t, 2>& graphicsAndPresentQueueFamilyIndices) {
 	
 	const auto capabilities = physicalDevice.getSurfaceCapabilitiesKHR(surface);
 	const auto surfaceFormat = selectSurfaceFormat(physicalDevice, surface);
@@ -323,7 +316,7 @@ VulkanGraphicsContext::VulkanGraphicsContext(std::unique_ptr<IWindowingSystem> _
 	, context{context}
 	, surface{ windowingSystem->createSurface(context.getInstance()) }
 	, graphicsAndPresentQueueFamilyIndices{ findGraphicsAndPresentQueueFamilyIndex(context.getPhysicalDevice(), surface) }
-	, device{ CreateDevice(context.getPhysicalDevice(), surface)}
+	, device{ CreateDevice(context.getContext(), context.getPhysicalDevice(), surface)}
 	, graphicsQueue{device, graphicsAndPresentQueueFamilyIndices[0], 0}
 	, presentQueue{device, graphicsAndPresentQueueFamilyIndices[1], 0}
 	, swapchain{ createSwapchain(context.getPhysicalDevice(), device, surface, *windowingSystem, graphicsAndPresentQueueFamilyIndices)}
@@ -350,7 +343,8 @@ vk::Extent2D VulkanGraphicsContext::getExtent() const {
 
 
 VulkanContext::VulkanContext(std::span<const char*> requiredExtensions)
-	: instance{ MakeInstance(context, requiredExtensions)}
+	: context{}
+	, instance{ MakeInstance(context, requiredExtensions)}
 	, physicalDevice { GetAppropriatePhysicalDevice(instance)}
 {
 	std::println(std::cout, "Selected device {}", static_cast<std::string_view>(physicalDevice.getProperties().deviceName));
@@ -359,3 +353,5 @@ VulkanContext::VulkanContext(std::span<const char*> requiredExtensions)
 VulkanGraphicsContext VulkanContext::makeGraphicsContext(std::unique_ptr<IWindowingSystem> windowingSystem) {
 	return VulkanGraphicsContext{ std::move(windowingSystem), *this};
 }
+
+VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE

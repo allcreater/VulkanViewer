@@ -1,13 +1,8 @@
 module;
-#include <algorithm>
-#include <memory>
-#include <ranges>
-
-#include <vulkan/vulkan_raii.hpp>
 #include "SDL2/SDL_vulkan.h"
-
 export module engine : vulkan.sdl;
-
+import vulkan_hpp;
+import std;
 import :vulkan.context;
 
 export std::vector<const char*> getRequiredExtensions() {
