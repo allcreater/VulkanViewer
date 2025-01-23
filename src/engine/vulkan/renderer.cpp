@@ -5,7 +5,6 @@ import std;
 import :utils;
 import :vulkan.context;
 
-
 struct Synchronization {
 	explicit Synchronization(const vk::raii::Device& device)
 		: imageAvailable{ device, vk::SemaphoreCreateInfo{} }
@@ -31,9 +30,7 @@ private:
 	VulkanGraphicsContext graphicsContext;
 	vk::raii::ShaderModule vs{ nullptr }, fs{ nullptr };
 	vk::raii::PipelineLayout pipelineLayout{ nullptr };
-	vk::raii::RenderPass renderPass{ nullptr };
 	vk::raii::Pipeline trianglePipeline{nullptr};
-	std::vector<vk::raii::Framebuffer> framebuffers;
 	//vk::raii::CommandPool commandPool;
 	std::vector<vk::raii::CommandBuffer> commandBuffers;
 	std::vector<Synchronization> sync;
@@ -207,106 +204,36 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 	pipelineLayout = device.createPipelineLayout(layoutCreateInfo);
 
 
-	const std::array<vk::AttachmentDescription, 1> attachmentDescriptions{
-		vk::AttachmentDescription {
-			.flags = {},
-			.format = graphicsContext.getSurfaceFormat().format,
-			.samples = vk::SampleCountFlagBits::e1,
-			.loadOp = vk::AttachmentLoadOp::eClear,
-			.storeOp = vk::AttachmentStoreOp::eStore,
-			.stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
-			.stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
-			.initialLayout = vk::ImageLayout::eUndefined,
-			.finalLayout = vk::ImageLayout::ePresentSrcKHR,
-		},
-	};
-	
-	const std::array<vk::AttachmentReference, 1> subpassAttachmentRefs{
-		vk::AttachmentReference {
-			.attachment = 0,
-			.layout = vk::ImageLayout::eColorAttachmentOptimal,
-		},
+	const std::array colorAttachmentFormats{
+		graphicsContext.getSurfaceFormat().format
 	};
 
-	const std::array<vk::SubpassDescription, 1> subpassDescriptions{
-		vk::SubpassDescription {
-			.flags                   = {},
-			.pipelineBindPoint       = vk::PipelineBindPoint::eGraphics,
-			.inputAttachmentCount    = 0,
-			.pInputAttachments       = nullptr,
-			.colorAttachmentCount    = static_cast<uint32_t>(subpassAttachmentRefs.size()),
-			.pColorAttachments       = subpassAttachmentRefs.data(),
-			.pResolveAttachments     = nullptr,
-			.pDepthStencilAttachment = nullptr,
-			.preserveAttachmentCount = 0,
-			.pPreserveAttachments    = nullptr,
+	vk::StructureChain createInfo{
+		vk::GraphicsPipelineCreateInfo{
+			.flags = {},
+			.stageCount = static_cast<uint32_t>(stages.size()),
+			.pStages = stages.data(),
+			.pVertexInputState = &vertexInputState,
+			.pInputAssemblyState = &inputAssemblyState,
+			.pTessellationState = &tesselationState,
+			.pViewportState = &viewportState,
+			.pRasterizationState = &rasterizationState,
+			.pMultisampleState = &multisampleState,
+			.pDepthStencilState = nullptr,
+			.pColorBlendState = &colorBlendState,
+			.pDynamicState = &dynamicState,
+			.layout = pipelineLayout,
+			.subpass = 0,
+			.basePipelineHandle = {nullptr},
+			.basePipelineIndex = -1,
+		},
+		vk::PipelineRenderingCreateInfo {
+			.colorAttachmentCount = static_cast<uint32_t>(colorAttachmentFormats.size()),
+			.pColorAttachmentFormats = colorAttachmentFormats.data(),
 		}
 	};
 
-	const std::array<vk::SubpassDependency, 1> dependencies{
-		vk::SubpassDependency{
-			.srcSubpass      = vk::SubpassExternal,
-			.dstSubpass      = 0,
-			.srcStageMask    = vk::PipelineStageFlagBits::eColorAttachmentOutput,
-			.dstStageMask    = vk::PipelineStageFlagBits::eColorAttachmentOutput,
-			.srcAccessMask   = {},
-			.dstAccessMask   = vk::AccessFlagBits::eColorAttachmentWrite,
-			.dependencyFlags = {},
-		},
-	};
-
-	const vk::RenderPassCreateInfo renderPassCreateInfo{
-		.flags           = {},
-		.attachmentCount = static_cast<uint32_t>(attachmentDescriptions.size()),
-		.pAttachments    = attachmentDescriptions.data(),
-		.subpassCount    = static_cast<uint32_t>(subpassDescriptions.size()),
-		.pSubpasses      = subpassDescriptions.data(),
-		.dependencyCount = static_cast<uint32_t>(dependencies.size()),
-		.pDependencies   = dependencies.data(),
-	};
-
-	renderPass = device.createRenderPass(renderPassCreateInfo);
-
-	const vk::GraphicsPipelineCreateInfo create_info{
-		.flags = {},
-		.stageCount = static_cast<uint32_t>(stages.size()),
-		.pStages = stages.data(),
-		.pVertexInputState = &vertexInputState,
-		.pInputAssemblyState = &inputAssemblyState,
-		.pTessellationState = &tesselationState,
-		.pViewportState = &viewportState,
-		.pRasterizationState = &rasterizationState,
-		.pMultisampleState = &multisampleState,
-		.pDepthStencilState = nullptr,
-		.pColorBlendState = &colorBlendState,
-		.pDynamicState = &dynamicState,
-		.layout = pipelineLayout,
-		.renderPass = renderPass,
-		.subpass = 0,
-		.basePipelineHandle = {nullptr},
-		.basePipelineIndex = -1,
-	};
-
-	trianglePipeline = device.createGraphicsPipeline({nullptr}, create_info);
-
-
-
-	// framebuffers
-	const auto makeFramebuffer = [renderPass = *renderPass, swapChainExtent, &device](vk::ImageView imageView) {
-		const vk::FramebufferCreateInfo createInfo{
-			.flags = {},
-			.renderPass = renderPass,
-			.attachmentCount = 1,
-			.pAttachments = &imageView,
-			.width = swapChainExtent.width,
-			.height = swapChainExtent.height,
-			.layers = 1,
-		};
-
-		return device.createFramebuffer(createInfo);
-	};
-
-	framebuffers = graphicsContext.getSwapchainData().imageViews | std::views::transform(makeFramebuffer) | std::ranges::to<std::vector>();
+	trianglePipeline = device.createGraphicsPipeline({nullptr}, createInfo.get());
 
 	commandBuffers = graphicsContext.createCommandBuffers(num_inflight_frames);
 }
@@ -328,25 +255,43 @@ void VulkanRenderer::Render() {
 	const vk::raii::SwapchainKHR& swapchain = graphicsContext.getSwapchainData().swapchain;
 	const auto [success, frameImageIndex] = swapchain.acquireNextImage(std::numeric_limits<uint64_t>::max(), frameSync.imageAvailable, nullptr);
 
+
 	commandBuffer.reset();
 	{
 		commandBuffer.begin({});
 
+		{
+			const vk::ImageMemoryBarrier2 barrier{
+				.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+				.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+				.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+				.oldLayout = vk::ImageLayout::eUndefined,
+				.newLayout = vk::ImageLayout::eColorAttachmentOptimal,
+				.image = graphicsContext.getSwapchainData().images[frameImageIndex],
+				.subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
+			};
+			commandBuffer.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
+		}
+
 		commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, trianglePipeline);
 
-		const std::array<vk::ClearValue, 1> clearValues = {
-			vk::ClearValue{vk::ClearColorValue{1.0f, 1.0f, 0.0f, 1.0f}},
+		const std::array colorAttachments{
+			vk::RenderingAttachmentInfo {
+				.imageView = graphicsContext.getSwapchainData().imageViews[frameImageIndex],
+				.imageLayout = vk::ImageLayout::eAttachmentOptimal,
+				.loadOp = vk::AttachmentLoadOp::eClear,
+				.storeOp = vk::AttachmentStoreOp::eStore,
+				.clearValue = {vk::ClearColorValue{1.0f, 1.0f, 0.0f, 1.0f}}
+			}
 		};
-		const vk::RenderPassBeginInfo renderPassBeginInfo{
-			.renderPass = renderPass,
-			.framebuffer = framebuffers[frameImageIndex],
+		commandBuffer.beginRendering({
 			.renderArea = {.offset = {}, .extent = swapChainExtent },
-			.clearValueCount = static_cast<uint32_t>(clearValues.size()),
-			.pClearValues = clearValues.data(),
-		};
-		commandBuffer.beginRenderPass(renderPassBeginInfo, vk::SubpassContents::eInline);
+			.layerCount = 1,
+			.colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size()),
+			.pColorAttachments = colorAttachments.data(),
+		});
 
-		const std::array<vk::Viewport, 1> viewports{
+		const std::array viewports{
 			vk::Viewport{
 				.x = 0.0f,
 				.y = 0.0f,
@@ -369,7 +314,22 @@ void VulkanRenderer::Render() {
 
 		commandBuffer.draw(3, 1, 0, 0);
 
-		commandBuffer.endRenderPass();
+		commandBuffer.endRendering();
+
+		{
+			const vk::ImageMemoryBarrier2 barrier{
+				.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+				.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+				.dstStageMask = vk::PipelineStageFlagBits2::eNone,
+				.dstAccessMask = vk::AccessFlagBits2::eNone,
+				.oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
+				.newLayout = vk::ImageLayout::ePresentSrcKHR,
+				.image = graphicsContext.getSwapchainData().images[frameImageIndex],
+				.subresourceRange = {.aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
+			};
+			commandBuffer.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
+		}
+
 		commandBuffer.end();
 	}
 

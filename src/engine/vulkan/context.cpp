@@ -27,7 +27,7 @@ class VulkanContext;
 struct SwapchainData {
 	vk::raii::SwapchainKHR swapchain;
 	vk::SurfaceFormatKHR surfaceFormat;
-	//std::vector<vk::raii::Image> images;
+	std::vector<vk::Image> images;
 	std::vector<vk::raii::ImageView> imageViews;
 };
 
@@ -190,23 +190,28 @@ vk::raii::Device CreateDevice(const vk::raii::Context& context, const vk::raii::
 		},
 	};
 
-	vk::PhysicalDeviceFeatures deviceFeatures{};
-	constexpr std::array<const char*, 1> requiredDeviceExtensions{
-		vk::KHRSwapchainExtensionName
+	constexpr std::array requiredDeviceExtensions{
+		vk::KHRSwapchainExtensionName,
 	};
 
 	const auto desiredLayers = SelectLayers(context);
-	vk::DeviceCreateInfo deviceCreateInfo{
-		.queueCreateInfoCount = (graphicsQueueIndex != presentQueueIndex) ? 2u : 1u, // static_cast<uint32_t>(queueCreateInfo.size()),
-		.pQueueCreateInfos = queueCreateInfo.data(),
-		.enabledLayerCount = static_cast<uint32_t>(desiredLayers.size()),
-		.ppEnabledLayerNames = desiredLayers.data(),
-		.enabledExtensionCount = static_cast<uint32_t>(requiredDeviceExtensions.size()),
-		.ppEnabledExtensionNames = requiredDeviceExtensions.data(),
-		.pEnabledFeatures = &deviceFeatures,
+	vk::StructureChain deviceCreateInfo = {
+		vk::DeviceCreateInfo{
+			.queueCreateInfoCount = (graphicsQueueIndex != presentQueueIndex) ? 2u : 1u, // static_cast<uint32_t>(queueCreateInfo.size()),
+			.pQueueCreateInfos = queueCreateInfo.data(),
+			.enabledLayerCount = static_cast<uint32_t>(desiredLayers.size()),
+			.ppEnabledLayerNames = desiredLayers.data(),
+			.enabledExtensionCount = static_cast<uint32_t>(requiredDeviceExtensions.size()),
+			.ppEnabledExtensionNames = requiredDeviceExtensions.data(),
+		},
+		vk::PhysicalDeviceFeatures2{.features = {.shaderInt64 = true } },
+		vk::PhysicalDeviceDynamicRenderingFeatures{.dynamicRendering = true},
+		vk::PhysicalDeviceSynchronization2Features{.synchronization2 = true },
+		//vk::PhysicalDeviceBufferDeviceAddressFeatures{.bufferDeviceAddress = true },
+		//vk::PhysicalDeviceVulkan11Features{.variablePointersStorageBuffer = true, .variablePointers = true},
 	};
 
-	return physicalDevice.createDevice(deviceCreateInfo);
+	return physicalDevice.createDevice(deviceCreateInfo.get());
 }
 
 vk::SurfaceFormatKHR selectSurfaceFormat(const vk::raii::PhysicalDevice& physicalDevice, const vk::SurfaceKHR& surface) {
@@ -290,11 +295,13 @@ SwapchainData createSwapchain(const vk::raii::PhysicalDevice& physicalDevice, co
 		return device.createImageView(createInfo);
 	};
 
-	auto imageViews = swapchain.getImages() | std::views::transform(makeView) | std::ranges::to<std::vector>();
+	auto images = swapchain.getImages();
+	auto imageViews = images | std::views::transform(makeView) | std::ranges::to<std::vector>();
 
 	return SwapchainData{
 		.swapchain = std::move(swapchain),
 		.surfaceFormat = surfaceFormat,
+		.images = std::move(images),
 		.imageViews = std::move(imageViews),
 	};
 }
