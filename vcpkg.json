@@ -4,6 +4,7 @@
   "dependencies": [
     "glm",
     "vulkan-headers",
+    "vulkan-memory-allocator",
     {
       "name":  "sdl2",
       "features": [ "vulkan" ]

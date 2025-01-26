@@ -1,3 +1,6 @@
+module;
+#include <glm/glm.hpp>
+
 export module engine : vulkan.renderer;
 import vulkan_hpp;
 import std;
@@ -31,6 +34,7 @@ private:
 	vk::raii::ShaderModule vs{ nullptr }, fs{ nullptr };
 	vk::raii::PipelineLayout pipelineLayout{ nullptr };
 	vk::raii::Pipeline trianglePipeline{nullptr};
+	ResourceFactory::Handle<vk::Buffer> vertexBuffer;
 	//vk::raii::CommandPool commandPool;
 	std::vector<vk::raii::CommandBuffer> commandBuffers;
 	std::vector<Synchronization> sync;
@@ -57,6 +61,7 @@ vk::raii::ShaderModule loadShaderModule(const vk::raii::Device& device, const st
 
 VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 	: graphicsContext{std::move(_graphicsContext)}
+	, vertexBuffer{nullptr}
 {
 	sync = std::views::iota(0, num_inflight_frames) | std::views::transform([&](auto _) { return Synchronization{ graphicsContext.getDevice() }; }) | std::ranges::to<std::vector>();
 
@@ -81,12 +86,33 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 		},
 	};
 
+	const std::array vertexBindingDescriptions{
+		vk::VertexInputBindingDescription {
+			.binding = 0,
+			.stride = sizeof(float) * 5,
+			.inputRate = vk::VertexInputRate::eVertex,
+		}
+	};
+	const std::array vertexAttributeDescriptions{
+		vk::VertexInputAttributeDescription {
+			.location = 0,
+			.binding = 0,
+			.format = vk::Format::eR32G32Sfloat,
+			.offset = 0,
+		},
+		vk::VertexInputAttributeDescription {
+			.location = 1,
+			.binding = 0,
+			.format = vk::Format::eR32G32B32Sfloat,
+			.offset = sizeof(float) * 2,
+		}
+	};
 	const vk::PipelineVertexInputStateCreateInfo vertexInputState{
 		.flags = {},
-		.vertexBindingDescriptionCount = 0,
-		.pVertexBindingDescriptions = {},
-		.vertexAttributeDescriptionCount = 0,
-		.pVertexAttributeDescriptions = {},
+		.vertexBindingDescriptionCount = vertexBindingDescriptions.size(),
+		.pVertexBindingDescriptions = vertexBindingDescriptions.data(),
+		.vertexAttributeDescriptionCount = vertexAttributeDescriptions.size(),
+		.pVertexAttributeDescriptions = vertexAttributeDescriptions.data(),
 	};
 
 	const vk::PipelineInputAssemblyStateCreateInfo inputAssemblyState{
@@ -235,6 +261,31 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext)
 
 	trianglePipeline = device.createGraphicsPipeline({nullptr}, createInfo.get());
 
+	struct Vertex
+	{
+		glm::vec2 pos;
+		glm::vec3 color;
+	};
+	std::array vertices = {
+		Vertex{.pos = {0, -0.5}, .color = {1.0, 0.0, 0.0}},
+		Vertex{.pos = {0.5, 0.5}, .color = {0.0, 1.0, 0.0}},
+		Vertex{.pos = {-0.5, 0.5}, .color = {0.0, 0.0, 1.0}},
+	};
+	const auto bufferData = std::as_bytes(std::span{ vertices });
+
+	auto buffer = graphicsContext.getResourceFactory().CreateBuffer({
+		.flags = {},
+		.size = bufferData.size_bytes(),
+		.usage = vk::BufferUsageFlagBits::eVertexBuffer,
+		.sharingMode = vk::SharingMode::eExclusive,
+	}, CasualUsage::AutoMapped);
+	//std::memcpy(allocationInfo.pMappedData, vertices.data(), bufferData.size_bytes());
+	std::ranges::copy(bufferData, buffer.mappedMemory().begin());
+
+	vertexBuffer = std::move(buffer);
+	
+
+
 	commandBuffers = graphicsContext.createCommandBuffers(num_inflight_frames);
 }
 
@@ -273,8 +324,6 @@ void VulkanRenderer::Render() {
 			commandBuffer.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
 		}
 
-		commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, trianglePipeline);
-
 		const std::array colorAttachments{
 			vk::RenderingAttachmentInfo {
 				.imageView = graphicsContext.getSwapchainData().imageViews[frameImageIndex],
@@ -311,6 +360,9 @@ void VulkanRenderer::Render() {
 			},
 		};
 		commandBuffer.setScissor(0, scissorRects);
+
+		commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, trianglePipeline);
+		commandBuffer.bindVertexBuffers(0, *vertexBuffer, { 0 });
 
 		commandBuffer.draw(3, 1, 0, 0);
 

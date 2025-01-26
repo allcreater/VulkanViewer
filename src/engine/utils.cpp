@@ -40,4 +40,27 @@ std::vector<char> readFile(std::filesystem::path path) {
 	return data;
 }
 
+class NotMovableOrCopyable {
+public:
+	NotMovableOrCopyable() = default;
+
+	NotMovableOrCopyable(const NotMovableOrCopyable& _) = delete;
+	NotMovableOrCopyable(NotMovableOrCopyable&& _) = delete;
+	NotMovableOrCopyable& operator=(const NotMovableOrCopyable& _) = delete;
+	NotMovableOrCopyable& operator=(NotMovableOrCopyable&& _) = delete;
+};
+
+class MoveOnly {
+public:
+	MoveOnly() = default;
+
+	MoveOnly(const MoveOnly& _) = default;
+	MoveOnly(MoveOnly&& _) = default;
+	MoveOnly& operator=(const MoveOnly& _) = delete;
+	MoveOnly& operator=(MoveOnly&& _) = delete;
+};
+
+template <typename T>
+using OwningPtr = T*;
+
 }

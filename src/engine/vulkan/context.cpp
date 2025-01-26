@@ -7,6 +7,7 @@ import vulkan_hpp;
 import std;
 
 import :utils;
+import :vulkan.resource_factory;
 
 
 export class IWindowingSystem
@@ -47,6 +48,7 @@ public:
 	const vk::raii::Queue& getGraphicsQueue() const { return graphicsQueue; }
 	const vk::raii::Queue& getPresentQueue() const { return presentQueue; }
 
+	ResourceFactory& getResourceFactory() { return m_resourceFactory; }
 
 private:
 	std::unique_ptr<IWindowingSystem> windowingSystem;
@@ -54,6 +56,7 @@ private:
 	vk::raii::SurfaceKHR surface;
 	std::array<uint32_t, 2> graphicsAndPresentQueueFamilyIndices;
 	vk::raii::Device device;
+	ResourceFactory m_resourceFactory;
 	vk::raii::Queue graphicsQueue, presentQueue;
 	SwapchainData swapchain;
 	vk::raii::CommandPool commandPool;
@@ -324,6 +327,7 @@ VulkanGraphicsContext::VulkanGraphicsContext(std::unique_ptr<IWindowingSystem> _
 	, surface{ windowingSystem->createSurface(context.getInstance()) }
 	, graphicsAndPresentQueueFamilyIndices{ findGraphicsAndPresentQueueFamilyIndex(context.getPhysicalDevice(), surface) }
 	, device{ CreateDevice(context.getContext(), context.getPhysicalDevice(), surface)}
+	, m_resourceFactory{ context.getInstance(), context.getPhysicalDevice(), device}
 	, graphicsQueue{device, graphicsAndPresentQueueFamilyIndices[0], 0}
 	, presentQueue{device, graphicsAndPresentQueueFamilyIndices[1], 0}
 	, swapchain{ createSwapchain(context.getPhysicalDevice(), device, surface, *windowingSystem, graphicsAndPresentQueueFamilyIndices)}
