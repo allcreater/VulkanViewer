@@ -2,7 +2,7 @@
 
 add_executable (VulkanViewer
 	"VulkanViewer.cpp"
-	"VulkanViewer.h"
+	
 )
 
 find_package(sdl2 REQUIRED)

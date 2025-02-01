@@ -1,5 +1,5 @@
 ﻿# all folders starts with dot meant to be private
-/.*
+/.*/
 # build results
 /out
 

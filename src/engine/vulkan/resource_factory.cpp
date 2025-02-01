@@ -1,7 +1,7 @@
 module;
 #include <cassert>
 #include <vma/vk_mem_alloc.h>
-export module engine : vulkan.resource_factory;
+export module engine:vulkan.resource_factory;
 
 import vulkan_hpp;
 import std;
@@ -11,138 +11,123 @@ import :vulkan.memory_allocator;
 
 export class ResourceFactory : MoveOnly {
 public:
-	// NOTE: Resources lifetimes are actually bound to the ResourceFactory, but may be released automatically if they are not used
-	template <typename T>
-	class Handle : private std::shared_ptr<void>
-	{
-	public:
-		friend class ResourceFactory;
+    // NOTE: Resources lifetimes are actually bound to the ResourceFactory, but may be released automatically if they are not used
+    template <typename T>
+    class Handle : private std::shared_ptr<void> {
+    public:
+        friend class ResourceFactory;
 
-		T operator*() const noexcept;
-		std::span<std::byte> mappedMemory() const;
+        T                    operator*() const noexcept;
+        std::span<std::byte> mappedMemory() const;
 
-	private:
-		using std::shared_ptr<void>::shared_ptr;
-	}; 
+    private:
+        using std::shared_ptr<void>::shared_ptr;
+    };
+
 public:
-	ResourceFactory(const vk::raii::Instance& instance, vk::PhysicalDevice physicalDevice, const vk::raii::Device& device);
-	~ResourceFactory();
+    ResourceFactory(const vk::raii::Instance& instance, vk::PhysicalDevice physicalDevice, const vk::raii::Device& device);
+    ~ResourceFactory();
 
-	ResourceFactory(ResourceFactory&&);
-	ResourceFactory& operator=(ResourceFactory&&);
+    ResourceFactory(ResourceFactory&&);
+    ResourceFactory& operator=(ResourceFactory&&);
 
-	Handle<vk::Buffer> CreateBuffer(const vk::BufferCreateInfo& createInfo, CasualUsage usage);
+    Handle<vk::Buffer> CreateBuffer(const vk::BufferCreateInfo& createInfo, CasualUsage usage);
 
-	void FreeUnusedResources();
+    void FreeUnusedResources();
 
 private:
-	VulkanMemoryAllocator m_resourceAllocator;
+    VulkanMemoryAllocator m_resourceAllocator;
 
-	std::shared_ptr<ResourceFactory*> m_sharedSelf = std::make_shared<ResourceFactory*>(this);
-	//std::vector<Handle<vk::Buffer>> m_usedBuffers;
+    std::shared_ptr<ResourceFactory*> m_sharedSelf = std::make_shared<ResourceFactory*>(this);
+    // std::vector<Handle<vk::Buffer>> m_usedBuffers;
 
-	uint64_t m_currentTick = 0;
-	struct DelayedDeleter
-	{
-		uint64_t invalidationTimestamp;
-		std::function<void(VulkanMemoryAllocator&)> deleter;
-	};
-	std::deque<DelayedDeleter> m_deleters;
+    uint64_t m_currentTick = 0;
+    struct DelayedDeleter {
+        uint64_t                                    invalidationTimestamp;
+        std::function<void(VulkanMemoryAllocator&)> deleter;
+    };
+    std::deque<DelayedDeleter> m_deleters;
 };
-
 
 
 // Implementation
 
 template <typename Resource>
-struct ResourceTraits
-{
-	using InternalType = AllocatedResource<Resource>;
-	using SharedPtrType = std::shared_ptr<InternalType>;
-	using HandleType = ResourceFactory::Handle<Resource>;
+struct ResourceTraits {
+    using InternalType  = AllocatedResource<Resource>;
+    using SharedPtrType = std::shared_ptr<InternalType>;
+    using HandleType    = ResourceFactory::Handle<Resource>;
 };
 
 template <typename Resource>
-Resource ResourceFactory::Handle<Resource>::operator*() const noexcept
-{
-	const auto& actualData = *std::static_pointer_cast<typename ResourceTraits<Resource>::InternalType>(*this);
-	return actualData.resource;
+Resource ResourceFactory::Handle<Resource>::operator*() const noexcept {
+    const auto& actualData = *std::static_pointer_cast<typename ResourceTraits<Resource>::InternalType>(*this);
+    return actualData.resource;
 }
 
 template <typename Resource>
-std::span<std::byte> ResourceFactory::Handle<Resource>::mappedMemory() const
-{
-	const auto& actualData = *std::static_pointer_cast<typename ResourceTraits<Resource>::InternalType>(*this);
-	assert(actualData.allocationInfo.pMappedData);
+std::span<std::byte> ResourceFactory::Handle<Resource>::mappedMemory() const {
+    const auto& actualData = *std::static_pointer_cast<typename ResourceTraits<Resource>::InternalType>(*this);
+    assert(actualData.allocationInfo.pMappedData);
 
-	return { reinterpret_cast<std::byte*>(actualData.allocationInfo.pMappedData), actualData.allocationInfo.size };
+    return {reinterpret_cast<std::byte*>(actualData.allocationInfo.pMappedData), actualData.allocationInfo.size};
 }
 
 ResourceFactory::ResourceFactory(const vk::raii::Instance& instance, vk::PhysicalDevice physicalDevice, const vk::raii::Device& device)
-	: m_resourceAllocator{instance, physicalDevice, device}
-{
-}
+    : m_resourceAllocator{instance, physicalDevice, device} {}
 
 ResourceFactory::ResourceFactory(ResourceFactory&& rhv)
-	: m_resourceAllocator(std::move(rhv.m_resourceAllocator))
-//	, m_usedBuffers(std::move(rhv.m_usedBuffers))
-	, m_currentTick(std::exchange(rhv.m_currentTick, 0))
-	, m_deleters(std::move(rhv.m_deleters))
-{
-}
+    : m_resourceAllocator(std::move(rhv.m_resourceAllocator))
+    //	, m_usedBuffers(std::move(rhv.m_usedBuffers))
+    , m_currentTick(std::exchange(rhv.m_currentTick, 0))
+    , m_deleters(std::move(rhv.m_deleters)) {}
 
-ResourceFactory& ResourceFactory::operator=(ResourceFactory&& rhv)
-{
-	ResourceFactory copy{std::move(rhv)};
-	std::swap(*this, copy);
+ResourceFactory& ResourceFactory::operator=(ResourceFactory&& rhv) {
+    ResourceFactory copy{std::move(rhv)};
+    std::swap(*this, copy);
 
-	return *this;
+    return *this;
 }
 
 
-ResourceFactory::~ResourceFactory()
-{
-	*m_sharedSelf = nullptr;
-	while (!m_deleters.empty())
-	{
-		FreeUnusedResources();
-	}
+ResourceFactory::~ResourceFactory() {
+    *m_sharedSelf = nullptr;
+    while (!m_deleters.empty()) {
+        FreeUnusedResources();
+    }
 }
 
-ResourceFactory::Handle<vk::Buffer> ResourceFactory::CreateBuffer(const vk::BufferCreateInfo& createInfo, CasualUsage usage)
-{
-	using Traits = ResourceTraits<vk::Buffer>;
-	auto resource = m_resourceAllocator.Create(createInfo, usage);
+ResourceFactory::Handle<vk::Buffer> ResourceFactory::CreateBuffer(const vk::BufferCreateInfo& createInfo, CasualUsage usage) {
+    using Traits  = ResourceTraits<vk::Buffer>;
+    auto resource = m_resourceAllocator.Create(createInfo, usage);
 
-	auto deleter = [factoryPtr = m_sharedSelf](const Traits::InternalType* resourceInfo)
-	{
-		if (*factoryPtr)
-		{
-			auto& factory = **factoryPtr;
+    auto deleter = [factoryPtr = m_sharedSelf](const Traits::InternalType* resourceInfo) {
+        if (*factoryPtr) {
+            auto& factory = **factoryPtr;
 
-			// note that resourceInfo is an owning ptr, it will be deleted with resource later
-			factory.m_deleters.emplace_back(factory.m_currentTick, [resourceInfo](VulkanMemoryAllocator& allocator)
-			{
-				allocator.Destroy(*resourceInfo);
-				delete resourceInfo;
-			});
-			return;
-		}
-		assert(false);
-	};
+            // note that resourceInfo is an owning ptr, it will be deleted with resource later
+            factory.m_deleters.emplace_back(factory.m_currentTick, [resourceInfo](VulkanMemoryAllocator& allocator) {
+                allocator.Destroy(*resourceInfo);
+                delete resourceInfo;
+            });
+            return;
+        }
+        assert(false);
+    };
 
-	Traits::SharedPtrType ptr{ new Traits::InternalType(resource), deleter };
-	//m_usedBuffers.push_back(ptr);
+    Traits::SharedPtrType ptr{new Traits::InternalType(resource), deleter};
+    // m_usedBuffers.push_back(ptr);
 
-	return {std::move(ptr)};
+    return {std::move(ptr)};
 }
 
-void ResourceFactory::FreeUnusedResources()
-{
-	constexpr uint64_t kDestroyDelay = 5;
-	auto nearestAliveIt = std::ranges::find_if(m_deleters, [this](uint64_t invalidationTimestamp) {return m_currentTick - invalidationTimestamp < kDestroyDelay; }, &DelayedDeleter::invalidationTimestamp);
-	std::ranges::for_each(m_deleters.begin(), nearestAliveIt, [this](auto&& function) { function(m_resourceAllocator); }, &DelayedDeleter::deleter);
-	m_deleters.erase(m_deleters.begin(), nearestAliveIt);
-	
-	m_currentTick++;
+void ResourceFactory::FreeUnusedResources() {
+    constexpr uint64_t kDestroyDelay  = 5;
+    auto               nearestAliveIt = std::ranges::find_if(
+        m_deleters, [this](uint64_t invalidationTimestamp) { return m_currentTick - invalidationTimestamp < kDestroyDelay; },
+        &DelayedDeleter::invalidationTimestamp);
+    std::ranges::for_each(m_deleters.begin(), nearestAliveIt, [this](auto&& function) { function(m_resourceAllocator); }, &DelayedDeleter::deleter);
+    m_deleters.erase(m_deleters.begin(), nearestAliveIt);
+
+    m_currentTick++;
 }
