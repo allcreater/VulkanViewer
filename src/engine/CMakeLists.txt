@@ -34,11 +34,14 @@ target_compile_features( VulkanHppModule PUBLIC cxx_std_23 )
 target_link_libraries( VulkanHppModule PUBLIC Vulkan::Vulkan )
 # end of Vulkan-related stuff
 
+add_subdirectory("utils")
 
 add_library(engine STATIC)
-target_link_libraries(engine PRIVATE VulkanHppModule SDL2::SDL2 GPUOpen::VulkanMemoryAllocator glm::glm)
-target_compile_definitions(engine 
+target_link_libraries(engine PRIVATE VulkanHppModule SDL2::SDL2 GPUOpen::VulkanMemoryAllocator glm::glm utils)
+target_compile_definitions(engine
     PRIVATE
+        GLM_FORCE_DEPTH_ZERO_TO_ONE
+        GLM_FORCE_LEFT_HANDED
         $<$<CONFIG:Debug>:AT3_DEBUG>
 )
 
@@ -63,7 +66,6 @@ target_sources(engine
             BASE_DIRS
             FILES
                 "engine.ixx"
-                "utils.cpp"
 )
 
 set_target_properties(engine PROPERTIES

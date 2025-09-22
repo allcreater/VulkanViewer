@@ -8,7 +8,7 @@ export module engine:vulkan.memory_allocator;
 import vulkan_hpp;
 import std;
 
-import :utils;
+import utils.core;
 
 export using VmaError = std::runtime_error;
 

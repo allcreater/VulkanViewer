@@ -1,15 +1,9 @@
 module;
-#include <algorithm>
-#include <filesystem>
-#include <fstream>
-#include <functional>
-#include <memory>
-#include <ranges>
-#include <vector>
+#include <cassert>
 
-#include <vulkan/vulkan_raii.hpp>
+export module utils.core;
 
-export module engine:utils;
+import std;
 
 export {
 

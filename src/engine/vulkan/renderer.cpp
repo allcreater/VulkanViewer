@@ -5,7 +5,7 @@ export module engine:vulkan.renderer;
 import vulkan_hpp;
 import std;
 
-import :utils;
+import utils.core;
 import :vulkan.context;
 
 struct Synchronization {
@@ -85,12 +85,12 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext) : graph
         },
     };
 
-    const std::array                             vertexBindingDescriptions{vk::VertexInputBindingDescription{
+    const std::array vertexBindingDescriptions{vk::VertexInputBindingDescription{
                                     .binding   = 0,
                                     .stride    = sizeof(float) * 5,
                                     .inputRate = vk::VertexInputRate::eVertex,
     }};
-    const std::array                             vertexAttributeDescriptions{vk::VertexInputAttributeDescription{
+    const std::array vertexAttributeDescriptions{vk::VertexInputAttributeDescription{
                                                                                  .location = 0,
                                                                                  .binding  = 0,
                                                                                  .format   = vk::Format::eR32G32Sfloat,

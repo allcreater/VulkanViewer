@@ -6,7 +6,7 @@ export module engine:vulkan.resource_factory;
 import vulkan_hpp;
 import std;
 
-import :utils;
+import utils.core;
 import :vulkan.memory_allocator;
 
 export class ResourceFactory : MoveOnly {

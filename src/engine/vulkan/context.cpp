@@ -6,7 +6,7 @@ export module engine:vulkan.context;
 import vulkan_hpp;
 import std;
 
-import :utils;
+import utils.core;
 import :vulkan.resource_factory;
 
 
@@ -216,7 +216,8 @@ vk::raii::Device CreateDevice(const vk::raii::Context& context, const vk::raii::
 }
 
 vk::SurfaceFormatKHR selectSurfaceFormat(const vk::raii::PhysicalDevice& physicalDevice, const vk::SurfaceKHR& surface) {
-    constexpr std::array<vk::SurfaceFormatKHR, 2> desiredFormats{
+    constexpr std::array desiredFormats{
+        vk::SurfaceFormatKHR{.format = vk::Format::eA2B10G10R10UnormPack32, .colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear},
         vk::SurfaceFormatKHR{.format = vk::Format::eB8G8R8A8Srgb, .colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear},
         vk::SurfaceFormatKHR{.format = vk::Format::eR8G8B8A8Srgb, .colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear},
     };

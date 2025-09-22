@@ -5,8 +5,9 @@
     "glm",
     "vulkan-headers",
     "vulkan-memory-allocator",
+    "tinygltf",
     {
-      "name":  "sdl2",
+      "name": "sdl2",
       "features": [ "vulkan" ]
     }
   ]
