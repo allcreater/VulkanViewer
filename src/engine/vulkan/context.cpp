@@ -1,6 +1,5 @@
 module;
 #include <cassert>
-#include <vulkan/vulkan_hpp_macros.hpp>
 
 export module engine:vulkan.context;
 import vulkan_hpp;
@@ -136,6 +135,7 @@ vk::raii::PhysicalDevice GetAppropriatePhysicalDevice(const vk::raii::Instance& 
             return static_cast<std::string_view>(props.extensionName) == vk::KHRSwapchainExtensionName;
         });
 
+
         // device.getSurfaceSupportKHR
         // const auto queueFamilyProperties = device.getQueueFamilyProperties();
         //	std::ranges::find_if(queueFamilyProperties, [](const vk::QueueFamilyProperties& props) {
@@ -194,6 +194,7 @@ vk::raii::Device CreateDevice(const vk::raii::Context& context, const vk::raii::
 
     constexpr std::array requiredDeviceExtensions{
         vk::KHRSwapchainExtensionName,
+        
     };
 
     const auto         desiredLayers    = SelectLayers(context);
@@ -357,4 +358,3 @@ VulkanGraphicsContext VulkanContext::makeGraphicsContext(std::unique_ptr<IWindow
     return VulkanGraphicsContext{std::move(windowingSystem), *this};
 }
 
-VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE

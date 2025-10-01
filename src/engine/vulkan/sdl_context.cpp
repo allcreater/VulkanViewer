@@ -1,5 +1,6 @@
 module;
-#include "SDL2/SDL_vulkan.h"
+#include "SDL3/SDL_vulkan.h"
+
 export module engine:vulkan.sdl;
 import vulkan_hpp;
 import std;
@@ -9,10 +10,9 @@ export std::vector<const char*> getRequiredExtensions() {
     std::vector<const char*> result;
 
     unsigned int array_size = 0;
-    SDL_Vulkan_GetInstanceExtensions(nullptr, &array_size, nullptr);
+    const auto extensions = SDL_Vulkan_GetInstanceExtensions(&array_size);
 
-    result.resize(array_size);
-    SDL_Vulkan_GetInstanceExtensions(nullptr, &array_size, result.data());
+    result.assign(extensions, extensions + array_size);
 
     return result;
 }
@@ -24,7 +24,7 @@ public:
     vk::raii::SurfaceKHR createSurface(const vk::raii::Instance& instance) const override {
         VkSurfaceKHR surface;
 
-        if (SDL_Vulkan_CreateSurface(window, *instance, &surface) == SDL_FALSE)
+        if (SDL_Vulkan_CreateSurface(window, *instance, nullptr, &surface) == false)
             throw std::runtime_error("SDL: cannot create Vulkan surface for specified window");
 
 
@@ -34,8 +34,7 @@ public:
 
     vk::Extent2D getExtent() const override {
         int width, height;
-        SDL_Vulkan_GetDrawableSize(window, &width, &height);
-
+        SDL_GetWindowSize(window, &width, &height);
         return {
             static_cast<uint32_t>(width),
             static_cast<uint32_t>(height),

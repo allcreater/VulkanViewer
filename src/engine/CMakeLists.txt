@@ -1,43 +1,9 @@
 ﻿cmake_minimum_required (VERSION 3.29)
 
-find_package(glm REQUIRED)
-find_package(sdl2 REQUIRED)
-find_package(Vulkan REQUIRED)
-find_package(VulkanMemoryAllocator CONFIG REQUIRED)
-
-# Vulkan-related stuff
-# Require Vulkan version ≥ 1.3.256 (earliest version when the Vulkan module was available)
-if( ${Vulkan_VERSION} VERSION_LESS "1.3.256" )
-  message( FATAL_ERROR "Minimum required Vulkan version for C++ modules is 1.3.256. "
-           "Found ${Vulkan_VERSION}."
-  )
-endif()
-
-# set up Vulkan C++ module as a library
-add_library( VulkanHppModule )
-target_sources( VulkanHppModule PUBLIC
-  FILE_SET CXX_MODULES
-  BASE_DIRS ${Vulkan_INCLUDE_DIR}
-  FILES ${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm
-)
-
-target_compile_definitions(VulkanHppModule
-    PUBLIC
-        VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
-        VULKAN_HPP_NO_SMART_HANDLE
-        VULKAN_HPP_NO_SPACESHIP_OPERATOR
-        VULKAN_HPP_NO_TO_STRING
-        VK_NO_PROTOTYPES
-)
-
-target_compile_features( VulkanHppModule PUBLIC cxx_std_23 )
-target_link_libraries( VulkanHppModule PUBLIC Vulkan::Vulkan )
-# end of Vulkan-related stuff
-
 add_subdirectory("utils")
 
 add_library(engine STATIC)
-target_link_libraries(engine PRIVATE VulkanHppModule SDL2::SDL2 GPUOpen::VulkanMemoryAllocator glm::glm utils)
+target_link_libraries(engine PRIVATE VulkanHppModule SDL3::SDL3 GPUOpen::VulkanMemoryAllocator glm::glm utils fastgltf::module)
 target_compile_definitions(engine
     PRIVATE
         GLM_FORCE_DEPTH_ZERO_TO_ONE

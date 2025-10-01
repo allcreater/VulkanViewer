@@ -1,6 +1,7 @@
 module;
 #include <cassert>
-#include <vma/vk_mem_alloc.h>
+#include <vk_mem_alloc.h>
+
 export module engine:vulkan.resource_factory;
 
 import vulkan_hpp;

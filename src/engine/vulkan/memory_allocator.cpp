@@ -1,7 +1,7 @@
 module;
 // #include <cassert>
 #define VMA_IMPLEMENTATION
-#include <vma/vk_mem_alloc.h>
+#include <vk_mem_alloc.h>
 
 export module engine:vulkan.memory_allocator;
 

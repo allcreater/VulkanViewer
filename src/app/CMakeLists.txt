@@ -5,13 +5,10 @@ add_executable (VulkanViewer
 	
 )
 
-find_package(sdl2 REQUIRED)
-
 target_link_libraries(VulkanViewer
 	PRIVATE
 		engine 
-		SDL2::SDL2main
-		SDL2::SDL2
+		SDL3::SDL3
 )
 
 

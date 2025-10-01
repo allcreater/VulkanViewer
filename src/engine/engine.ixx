@@ -1,7 +1,7 @@
 module;
-#include <memory>
-
 export module engine;
+
+import std;
 
 export class IEngine {
 public:

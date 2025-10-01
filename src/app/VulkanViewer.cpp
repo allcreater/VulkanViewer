@@ -1,8 +1,8 @@
 ﻿// VulkanViewer.cpp : Defines the entry point for the application.
 //
 
-#include <SDL2/SDL.h>
-#include "SDL2/SDL_vulkan.h"
+#include <SDL3/SDL.h>
+#include "SDL3/SDL_vulkan.h"
 
 import std;
 import engine;
@@ -14,7 +14,7 @@ public:
     void Run() {
         SDL_Init(SDL_INIT_VIDEO);
         std::unique_ptr<SDL_Window, SdlWindowDeleter> window{
-            SDL_CreateWindow("window", 100, 100, 1024, 768, SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_VULKAN)};
+            SDL_CreateWindow("window", 1024, 768, SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN)};
 
         // SDL_Vulkan_CreateSurface(window.get(), )
         auto engine = MakeEngine(window.get());
@@ -22,7 +22,7 @@ public:
         bool run = true;
         while (run) {
             for (SDL_Event event; SDL_PollEvent(&event) > 0;) {
-                if (event.type == SDL_QUIT)
+                if (event.type == SDL_EVENT_QUIT)
                     run = false;
             }
             engine->Render();
