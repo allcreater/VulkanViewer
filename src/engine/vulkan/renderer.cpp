@@ -30,7 +30,7 @@ private:
     constexpr static int num_inflight_frames = 2;
 
     VulkanGraphicsContext               graphicsContext;
-    vk::raii::ShaderModule              vs{nullptr}, fs{nullptr};
+    vk::raii::ShaderModule              shaderModule{nullptr};
     vk::raii::PipelineLayout            pipelineLayout{nullptr};
     vk::raii::Pipeline                  trianglePipeline{nullptr};
     ResourceFactory::Handle<vk::Buffer> vertexBuffer;
@@ -44,13 +44,12 @@ namespace
 {
 
 vk::raii::ShaderModule loadShaderModule(const vk::raii::Device& device, const std::filesystem::path& path) {
-    const auto                      data = readFile(path);
-    const std::span<const uint32_t> dataView{reinterpret_cast<const uint32_t*>(data.data()), data.size() / sizeof(uint32_t)};
+    const auto  data = readFile<std::uint32_t>(path);
 
     vk::ShaderModuleCreateInfo create_info{
         .flags    = {},
-        .codeSize = dataView.size_bytes(),
-        .pCode    = dataView.data(),
+        .codeSize = std::span{data}.size_bytes(),
+        .pCode    = data.data(),
     };
 
     return device.createShaderModule(create_info);
@@ -65,22 +64,21 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext) : graph
 
     const auto& device = graphicsContext.getDevice();
 
-    vs = loadShaderModule(device, "data/shaders/hello_world.vs.spv");
-    fs = loadShaderModule(device, "data/shaders/hello_world.fs.spv");
+    shaderModule = loadShaderModule(device, "data/shaders/hello_world.spv");
 
     const std::array<vk::PipelineShaderStageCreateInfo, 2> stages{
         vk::PipelineShaderStageCreateInfo{
             .flags               = {},
             .stage               = vk::ShaderStageFlagBits::eVertex,
-            .module              = vs,
-            .pName               = "main",
+            .module              = shaderModule,
+            .pName               = "vs_main",
             .pSpecializationInfo = nullptr,
         },
         vk::PipelineShaderStageCreateInfo{
             .flags               = {},
             .stage               = vk::ShaderStageFlagBits::eFragment,
-            .module              = fs,
-            .pName               = "main",
+            .module              = shaderModule,
+            .pName               = "fs_main",
             .pSpecializationInfo = nullptr,
         },
     };

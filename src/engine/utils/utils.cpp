@@ -19,7 +19,9 @@ export {
         });
     }
 
-    std::vector<char> readFile(std::filesystem::path path) {
+    template <typename T>
+    requires std::is_trivially_copyable_v<T>
+    std::vector<T> readFile(std::filesystem::path path) {
         std::basic_ifstream<char> stream{path, std::ios::binary | std::ios::in | std::ios::ate};
         stream.exceptions(std::ifstream::failbit);
 
@@ -29,8 +31,8 @@ export {
             return static_cast<size_t>(pos);
         }();
 
-        std::vector<char> data(dataLength);
-        data.assign(std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{});
+        std::vector<T> data(dataLength / sizeof(T));
+        std::copy(std::istreambuf_iterator<char>{stream}, std::istreambuf_iterator<char>{}, reinterpret_cast<char*>(data.data()));
         return data;
     }
 
