@@ -1,9 +1,14 @@
 module;
 #include <glm/glm.hpp>
 
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/ext/matrix_clip_space.hpp>
+// #include <fastgltf/glm_element_traits.hpp>
+
 export module engine:vulkan.renderer;
 import vulkan_hpp;
 import std;
+import fastgltf;
 
 import utils.core;
 import :vulkan.context;
@@ -25,6 +30,9 @@ public:
     ~VulkanRenderer();
 
     void Render();
+    void LoadModel(const std::filesystem::path& path);
+private:
+    void CreatePipeline();
 
 private:
     constexpr static int num_inflight_frames = 2;
@@ -33,7 +41,7 @@ private:
     vk::raii::ShaderModule              shaderModule{nullptr};
     vk::raii::PipelineLayout            pipelineLayout{nullptr};
     vk::raii::Pipeline                  trianglePipeline{nullptr};
-    ResourceFactory::Handle<vk::Buffer> vertexBuffer;
+    ResourceFactory::Handle<vk::Buffer> vertexBuffer, indexBuffer;
     // vk::raii::CommandPool commandPool;
     std::vector<vk::raii::CommandBuffer> commandBuffers;
     std::vector<Synchronization>         sync;
@@ -55,51 +63,68 @@ vk::raii::ShaderModule loadShaderModule(const vk::raii::Device& device, const st
     return device.createShaderModule(create_info);
 }
 
+struct Vertex {
+    fastgltf::math::fvec3 position;
+    fastgltf::math::fvec3 normal;
+    fastgltf::math::fvec2 uv;
+};
+
+struct Camera{
+    glm::fmat4x4 viewProjection;
+};
+
 } // namespace
 
 
-VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext) : graphicsContext{std::move(_graphicsContext)}, vertexBuffer{nullptr} {
-    sync = std::views::iota(0, num_inflight_frames) | std::views::transform([&](auto _) { return Synchronization{graphicsContext.getDevice()}; }) |
-        std::ranges::to<std::vector>();
-
+void VulkanRenderer::CreatePipeline() {
     const auto& device = graphicsContext.getDevice();
+    shaderModule = loadShaderModule(device, "data/shaders/simple_model.spv");
 
-    shaderModule = loadShaderModule(device, "data/shaders/hello_world.spv");
-
-    const std::array<vk::PipelineShaderStageCreateInfo, 2> stages{
+    const std::array stages{
         vk::PipelineShaderStageCreateInfo{
             .flags               = {},
             .stage               = vk::ShaderStageFlagBits::eVertex,
             .module              = shaderModule,
-            .pName               = "vs_main",
+            .pName               = "vertexMain",
             .pSpecializationInfo = nullptr,
         },
         vk::PipelineShaderStageCreateInfo{
             .flags               = {},
             .stage               = vk::ShaderStageFlagBits::eFragment,
             .module              = shaderModule,
-            .pName               = "fs_main",
+            .pName               = "fragmentMain",
             .pSpecializationInfo = nullptr,
         },
     };
 
-    const std::array vertexBindingDescriptions{vk::VertexInputBindingDescription{
-                                    .binding   = 0,
-                                    .stride    = sizeof(float) * 5,
-                                    .inputRate = vk::VertexInputRate::eVertex,
-    }};
-    const std::array vertexAttributeDescriptions{vk::VertexInputAttributeDescription{
-                                                                                 .location = 0,
-                                                                                 .binding  = 0,
-                                                                                 .format   = vk::Format::eR32G32Sfloat,
-                                                                                 .offset   = 0,
-                                                 },
-                                                 vk::VertexInputAttributeDescription{
-                                                                                 .location = 1,
-                                                                                 .binding  = 0,
-                                                                                 .format   = vk::Format::eR32G32B32Sfloat,
-                                                                                 .offset   = sizeof(float) * 2,
-                                                 }};
+    const std::array vertexBindingDescriptions{
+        vk::VertexInputBindingDescription{
+            .binding   = 0,
+            .stride    = sizeof(Vertex),
+            .inputRate = vk::VertexInputRate::eVertex,
+        },
+    };
+    constexpr std::array vertexAttributeDescriptions{
+        vk::VertexInputAttributeDescription{
+            .location = 0,
+            .binding  = 0,
+            .format   = vk::Format::eR32G32B32Sfloat,
+            .offset   = offsetof(Vertex, position),
+        },
+        vk::VertexInputAttributeDescription{
+            .location = 1,
+            .binding  = 0,
+            .format   = vk::Format::eR32G32B32Sfloat,
+            .offset   = offsetof(Vertex, normal),
+        },
+        vk::VertexInputAttributeDescription{
+            .location = 2,
+            .binding  = 0,
+            .format   = vk::Format::eR32G32Sfloat,
+            .offset   = offsetof(Vertex, uv),
+        },
+    };
+
     const vk::PipelineVertexInputStateCreateInfo vertexInputState{
         .flags                           = {},
         .vertexBindingDescriptionCount   = vertexBindingDescriptions.size(),
@@ -213,12 +238,41 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext) : graph
         .blendConstants  = std::array{0.0f, 0.0f, 0.0f, 0.0f},
     };
 
+    // std::array bindings{
+    //     vk::DescriptorSetLayoutBinding{
+    //         .binding            = 0,
+    //         .descriptorType     = vk::DescriptorType::eCombinedImageSampler,
+    //         .descriptorCount    = 1,
+    //         .stageFlags         = vk::ShaderStageFlagBits::eFragment,
+    //         .pImmutableSamplers = nullptr,
+    //     },
+    // };
+    //
+    // vk::DescriptorSetLayoutCreateInfo descriptorLayoutCreateInfo{
+    //     .flags        = {},
+    //     .bindingCount = bindings.size(),
+    //     .pBindings    = bindings.data(),
+    // };
+    //
+    // auto setLayout = device.createDescriptorSetLayout(descriptorLayoutCreateInfo);
+    // const std::array setLayouts{
+    //     *setLayout,
+    // };
+
+    constexpr std::array pushConstantsRanges{
+        vk::PushConstantRange{
+            .stageFlags = vk::ShaderStageFlagBits::eVertex,
+            .offset     = 0,
+            .size       = sizeof(glm::mat4),
+        },
+    };
+
     const vk::PipelineLayoutCreateInfo layoutCreateInfo{
         .flags                  = {},
-        .setLayoutCount         = 0,
-        .pSetLayouts            = nullptr,
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges    = nullptr,
+        // .setLayoutCount         = setLayouts.size(),
+        // .pSetLayouts            = setLayouts.data(),
+        .pushConstantRangeCount = pushConstantsRanges.size(),
+        .pPushConstantRanges    = pushConstantsRanges.data(),
     };
     pipelineLayout = device.createPipelineLayout(layoutCreateInfo);
 
@@ -249,31 +303,13 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext) : graph
                                   }};
 
     trianglePipeline = device.createGraphicsPipeline({nullptr}, createInfo.get());
+}
 
-    struct Vertex {
-        glm::vec2 pos;
-        glm::vec3 color;
-    };
-    std::array vertices = {
-        Vertex{.pos = {0, -0.5}, .color = {1.0, 0.0, 0.0}},
-        Vertex{.pos = {0.5, 0.5}, .color = {0.0, 1.0, 0.0}},
-        Vertex{.pos = {-0.5, 0.5}, .color = {0.0, 0.0, 1.0}},
-    };
-    const auto bufferData = std::as_bytes(std::span{vertices});
+VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext) : graphicsContext{std::move(_graphicsContext)}, vertexBuffer{nullptr} {
+    sync = std::views::iota(0, num_inflight_frames) | std::views::transform([&](auto _) { return Synchronization{graphicsContext.getDevice()}; }) |
+        std::ranges::to<std::vector>();
 
-    auto buffer = graphicsContext.getResourceFactory().CreateBuffer(
-        {
-            .flags       = {},
-            .size        = bufferData.size_bytes(),
-            .usage       = vk::BufferUsageFlagBits::eVertexBuffer,
-            .sharingMode = vk::SharingMode::eExclusive,
-        },
-        CasualUsage::AutoMapped);
-    // std::memcpy(allocationInfo.pMappedData, vertices.data(), bufferData.size_bytes());
-    std::ranges::copy(bufferData, buffer.mappedMemory().begin());
-
-    vertexBuffer = std::move(buffer);
-
+    CreatePipeline();
 
     commandBuffers = graphicsContext.createCommandBuffers(num_inflight_frames);
 }
@@ -348,9 +384,23 @@ void VulkanRenderer::Render() {
         commandBuffer.setScissor(0, scissorRects);
 
         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, trianglePipeline);
-        commandBuffer.bindVertexBuffers(0, *vertexBuffer, {0});
 
-        commandBuffer.draw(3, 1, 0, 0);
+        if (vertexBuffer && indexBuffer) {
+            commandBuffer.bindVertexBuffers(0, *vertexBuffer, {0});
+            commandBuffer.bindIndexBuffer(*indexBuffer, 0, vk::IndexType::eUint32);
+
+
+            auto proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 100.0f);
+            auto view = glm::lookAt(glm::vec3(20.0f, 20.0f, 20.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+            Camera camera{
+                .viewProjection = proj * view,
+            };
+            commandBuffer.pushConstants<Camera>(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, vk::ArrayProxy{camera});
+
+            int count = indexBuffer.mappedMemory().size() / sizeof(uint32_t);
+            commandBuffer.drawIndexed(count, 1, 0, 0, 0);
+            //commandBuffer.drawIndirect()
+        }
 
         commandBuffer.endRendering();
 
@@ -399,4 +449,87 @@ void VulkanRenderer::Render() {
     graphicsContext.getPresentQueue().presentKHR(presentInfo);
 
     currentFrame = (currentFrame + 1) % num_inflight_frames;
+}
+
+template <typename T>
+auto iterateAccessor (const fastgltf::Asset& asset, const fastgltf::Primitive& primitive, std::string_view name) {
+    auto it = primitive.findAttribute(name);
+    if (it == primitive.attributes.end())
+        throw std::runtime_error{"Model does not contain attribute"};
+
+    return fastgltf::iterateAccessor<T>(asset, asset.accessors[it->accessorIndex]);
+};
+
+template <typename T, std::ranges::range R>
+requires std::is_standard_layout_v<T>
+auto writeRangeToMemory(R&& dataRange, std::span<std::byte> destMemory) {
+    std::ranges::for_each(dataRange, [&destMemory](const T& vertex) {
+        std::memcpy(destMemory.data(), &vertex, sizeof(T));
+        destMemory = destMemory.subspan(sizeof(T));
+    });
+}
+
+// template <typename... Args>
+// auto iterateAccessors (const fastgltf::Asset& asset, const fastgltf::Primitive& primitive, std::array<std::string_view, sizeof...(Args)> name) {
+//
+// }
+
+void VulkanRenderer::LoadModel(const std::filesystem::path& path) {
+    fastgltf::GltfFileStream stream{path};
+
+    fastgltf::Parser parser{{}};
+    auto result = parser.loadGltf(stream, path.parent_path(), fastgltf::Options::LoadExternalBuffers | fastgltf::Options::LoadExternalImages);
+    if (!result) {
+        throw std::runtime_error{std::format("Failed to load model: {}", fastgltf::getErrorName(result.error()))};
+    }
+
+    // make vertex buffer
+
+    //result->meshes[0].primitives[0]
+
+    const auto& primitive = result->meshes[0].primitives[0];
+
+    // vertex
+    {
+        auto positions = iterateAccessor<fastgltf::math::fvec3>(result.get(), primitive, "POSITION");
+        auto normals = iterateAccessor<fastgltf::math::fvec3>(result.get(), primitive, "NORMAL");
+        auto uvs = iterateAccessor<fastgltf::math::fvec2>(result.get(), primitive, "TEXCOORD_0");
+        auto interleavedVertexAttribs = std::views::zip(positions, normals, uvs) | std::views::transform([](auto&& tuple) {
+            return std::make_from_tuple<Vertex>(tuple);
+        });
+
+
+        auto buffer = graphicsContext.getResourceFactory().CreateBuffer(
+            {
+                .flags       = {},
+                .size        = std::ranges::distance(interleavedVertexAttribs) * sizeof(Vertex),
+                .usage       = vk::BufferUsageFlagBits::eVertexBuffer,
+                .sharingMode = vk::SharingMode::eExclusive,
+            },
+            CasualUsage::AutoMapped);
+
+        writeRangeToMemory<Vertex>(interleavedVertexAttribs, buffer.mappedMemory());
+        std::span target {reinterpret_cast<Vertex*>(buffer.mappedMemory().data()), buffer.mappedMemory().size_bytes() / sizeof(Vertex)};
+
+        vertexBuffer = std::move(buffer);
+    }
+
+    // indices
+    {
+        const auto& accessor = result->accessors[primitive.indicesAccessor.value()];
+        auto buffer = graphicsContext.getResourceFactory().CreateBuffer(
+           {
+               .flags       = {},
+               .size        = accessor.count * sizeof(std::uint32_t),
+               .usage       = vk::BufferUsageFlagBits::eIndexBuffer,
+               .sharingMode = vk::SharingMode::eExclusive,
+           },
+           CasualUsage::AutoMapped);
+
+        fastgltf::copyFromAccessor<uint32_t>(result.get(), accessor, buffer.mappedMemory().data());
+
+        std::span target {reinterpret_cast<uint32_t*>(buffer.mappedMemory().data()), buffer.mappedMemory().size_bytes() / sizeof(uint32_t)};
+
+        indexBuffer = std::move(buffer);
+    }
 }

@@ -18,6 +18,9 @@ public:
 
         // SDL_Vulkan_CreateSurface(window.get(), )
         auto engine = MakeEngine(window.get());
+        engine->LoadModel(R"(D:\Git\glTF-Sample-Assets\Models\Lantern\glTF\Lantern.gltf)");
+
+
 
         bool run = true;
         while (run) {

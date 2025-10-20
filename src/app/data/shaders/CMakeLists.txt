@@ -9,9 +9,9 @@ endif()
 
 add_custom_target(
     app_shaders
-    COMMAND Vulkan::slangc -fvk-use-entrypoint-name "${CMAKE_CURRENT_SOURCE_DIR}/hello_world.slang" -o "hello_world.spv"
+    COMMAND Vulkan::slangc -fvk-use-entrypoint-name -emit-spirv-directly "${CMAKE_CURRENT_SOURCE_DIR}/simple_model.slang" -o "simple_model.spv"
     DEPENDS
-        "hello_world.slang"
+        "simple_model.slang"
 
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     COMMENT "Compile the shaders"

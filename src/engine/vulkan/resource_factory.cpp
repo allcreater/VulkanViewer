@@ -18,7 +18,8 @@ public:
     public:
         friend class ResourceFactory;
 
-        T                    operator*() const noexcept;
+        T operator*() const noexcept;
+        operator bool() const noexcept;
         std::span<std::byte> mappedMemory() const;
 
     private:
@@ -64,6 +65,11 @@ template <typename Resource>
 Resource ResourceFactory::Handle<Resource>::operator*() const noexcept {
     const auto& actualData = *std::static_pointer_cast<typename ResourceTraits<Resource>::InternalType>(*this);
     return actualData.resource;
+}
+
+template <typename Resource>
+ResourceFactory::Handle<Resource>::operator bool() const noexcept {
+    return std::shared_ptr<void>::operator bool();
 }
 
 template <typename Resource>

@@ -14,6 +14,10 @@ public:
 
     void Render() override { renderer.Render(); }
 
+    void LoadModel(const std::filesystem::path& path) override {
+        renderer.LoadModel(path);
+    }
+
 private:
     VulkanContext  vulkan_context;
     VulkanRenderer renderer;
