@@ -34,8 +34,13 @@ public:
     ResourceFactory& operator=(ResourceFactory&&);
 
     Handle<vk::Buffer> CreateBuffer(const vk::BufferCreateInfo& createInfo, CasualUsage usage);
+    Handle<vk::Image> CreateImage(const vk::ImageCreateInfo& createInfo, CasualUsage usage);
 
     void FreeUnusedResources();
+
+private:
+    template <typename T, typename ... Args>
+    ResourceFactory::Handle<T> CreateResource(Args&& ... args);
 
 private:
     VulkanMemoryAllocator m_resourceAllocator;
@@ -104,11 +109,15 @@ ResourceFactory::~ResourceFactory() {
     }
 }
 
-ResourceFactory::Handle<vk::Buffer> ResourceFactory::CreateBuffer(const vk::BufferCreateInfo& createInfo, CasualUsage usage) {
-    using Traits  = ResourceTraits<vk::Buffer>;
-    auto resource = m_resourceAllocator.Create(createInfo, usage);
+template <typename T, typename ... Args>
+ResourceFactory::Handle<T> ResourceFactory::CreateResource(Args&& ... args) {
+    using Traits  =  ResourceTraits<T>;
+    using InternalType = typename Traits::InternalType;
+    using SharedPtrType = typename Traits::SharedPtrType;
 
-    auto deleter = [factoryPtr = m_sharedSelf](const Traits::InternalType* resourceInfo) {
+    auto resource = m_resourceAllocator.Create(std::forward<Args>(args)...);
+
+    auto deleter = [factoryPtr = m_sharedSelf](const InternalType* resourceInfo) {
         if (*factoryPtr) {
             auto& factory = **factoryPtr;
 
@@ -122,10 +131,18 @@ ResourceFactory::Handle<vk::Buffer> ResourceFactory::CreateBuffer(const vk::Buff
         assert(false);
     };
 
-    Traits::SharedPtrType ptr{new Traits::InternalType(resource), deleter};
+     SharedPtrType ptr{new InternalType(resource), deleter};
     // m_usedBuffers.push_back(ptr);
 
     return {std::move(ptr)};
+}
+
+ResourceFactory::Handle<vk::Buffer> ResourceFactory::CreateBuffer(const vk::BufferCreateInfo& createInfo, CasualUsage usage) {
+    return CreateResource<vk::Buffer>(createInfo, usage);
+}
+
+ResourceFactory::Handle<vk::Image> ResourceFactory::CreateImage(const vk::ImageCreateInfo& createInfo, CasualUsage usage) {
+    return  CreateResource<vk::Image>(createInfo, usage);
 }
 
 void ResourceFactory::FreeUnusedResources() {

@@ -24,6 +24,11 @@ struct Synchronization {
     vk::raii::Fence     inFlightFence;
 };
 
+struct ImageWithView {
+    ResourceFactory::Handle<vk::Image> image;
+    vk::raii::ImageView                view;
+};
+
 export class VulkanRenderer final {
 public:
     VulkanRenderer(VulkanGraphicsContext&& graphicsContext);
@@ -42,9 +47,11 @@ private:
     vk::raii::PipelineLayout            pipelineLayout{nullptr};
     vk::raii::Pipeline                  trianglePipeline{nullptr};
     ResourceFactory::Handle<vk::Buffer> vertexBuffer, indexBuffer;
+
     // vk::raii::CommandPool commandPool;
     std::vector<vk::raii::CommandBuffer> commandBuffers;
     std::vector<Synchronization>         sync;
+    std::vector<ImageWithView>           depthBuffers;
     uint32_t                             currentFrame = 0;
 };
 
@@ -144,36 +151,13 @@ void VulkanRenderer::CreatePipeline() {
         .patchControlPoints = 0,
     };
 
-    const auto         swapChainExtent = graphicsContext.getExtent();
-    const vk::Viewport viewport{
-        .x        = 0.0f,
-        .y        = 0.0f,
-        .width    = (float)swapChainExtent.width,
-        .height   = (float)swapChainExtent.height,
-        .minDepth = 0.0f,
-        .maxDepth = 1.0f,
-    };
-
-    const vk::Rect2D scissor{
-        .offset = {0, 0},
-        .extent = swapChainExtent,
-    };
-
-    const vk::PipelineViewportStateCreateInfo viewportState{
-        .flags         = {},
-        .viewportCount = 1,
-        .pViewports    = &viewport,
-        .scissorCount  = 1,
-        .pScissors     = &scissor,
-    };
-
     vk::PipelineRasterizationStateCreateInfo rasterizationState{
         .flags                   = {},
         .depthClampEnable        = vk::False,
         .rasterizerDiscardEnable = vk::False,
         .polygonMode             = vk::PolygonMode::eFill,
         .cullMode                = vk::CullModeFlagBits::eBack,
-        .frontFace               = vk::FrontFace::eClockwise,
+        .frontFace               = vk::FrontFace::eCounterClockwise,
         .depthBiasEnable         = vk::False,
         .depthBiasConstantFactor = 0.0f,
         .depthBiasClamp          = 0.0f,
@@ -227,6 +211,18 @@ void VulkanRenderer::CreatePipeline() {
             .colorWriteMask =
                 vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
         },
+    };
+
+    const vk::PipelineDepthStencilStateCreateInfo depthStencilState{
+        .depthTestEnable       = true,
+        .depthWriteEnable      = true,
+        .depthCompareOp        = vk::CompareOp::eLess,
+        .depthBoundsTestEnable = false,
+        .stencilTestEnable     = false,
+        .front                 = {},
+        .back                  = {},
+        .minDepthBounds        = {},
+        .maxDepthBounds        = {},
     };
 
     const vk::PipelineColorBlendStateCreateInfo colorBlendState{
@@ -286,10 +282,10 @@ void VulkanRenderer::CreatePipeline() {
                                       .pVertexInputState   = &vertexInputState,
                                       .pInputAssemblyState = &inputAssemblyState,
                                       .pTessellationState  = &tesselationState,
-                                      .pViewportState      = &viewportState,
+                                      .pViewportState      = nullptr,
                                       .pRasterizationState = &rasterizationState,
                                       .pMultisampleState   = &multisampleState,
-                                      .pDepthStencilState  = nullptr,
+                                      .pDepthStencilState  = &depthStencilState,
                                       .pColorBlendState    = &colorBlendState,
                                       .pDynamicState       = &dynamicState,
                                       .layout              = pipelineLayout,
@@ -300,16 +296,60 @@ void VulkanRenderer::CreatePipeline() {
                                   vk::PipelineRenderingCreateInfo{
                                       .colorAttachmentCount    = static_cast<uint32_t>(colorAttachmentFormats.size()),
                                       .pColorAttachmentFormats = colorAttachmentFormats.data(),
+                                      .depthAttachmentFormat = vk::Format::eD32Sfloat,
                                   }};
 
     trianglePipeline = device.createGraphicsPipeline({nullptr}, createInfo.get());
 }
 
 VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext) : graphicsContext{std::move(_graphicsContext)}, vertexBuffer{nullptr} {
+    CreatePipeline();
+
+    const auto createDepthBuffer = [&] -> ImageWithView{
+        auto image = graphicsContext.getResourceFactory().CreateImage(vk::ImageCreateInfo{
+            .flags                 = {},
+            .imageType             = vk::ImageType::e2D,
+            .format                = vk::Format::eD32Sfloat,
+            .extent                = vk::Extent3D{graphicsContext.getExtent().width, graphicsContext.getExtent().height, 1},
+            .mipLevels             = 1,
+            .arrayLayers           = 1,
+            .samples               = vk::SampleCountFlagBits::e1,
+            .tiling                = vk::ImageTiling::eOptimal,
+            .usage                 = vk::ImageUsageFlagBits::eDepthStencilAttachment,
+            .sharingMode           = vk::SharingMode::eExclusive,
+            .queueFamilyIndexCount = {},
+            .pQueueFamilyIndices   = {},
+            .initialLayout         = vk::ImageLayout::eUndefined,
+        }, CasualUsage::Auto);
+
+        auto view = vk::raii::ImageView{graphicsContext.getDevice(),
+                                             vk::ImageViewCreateInfo{
+                                                 .flags      = {},
+                                                 .image      = *image,
+                                                 .viewType   = vk::ImageViewType::e2D,
+                                                 .format     = vk::Format::eD32Sfloat,
+                                                 .components = {},
+                                                 .subresourceRange =
+                                                     vk::ImageSubresourceRange{
+                                                         .aspectMask     = vk::ImageAspectFlagBits::eDepth,
+                                                         .baseMipLevel   = 0,
+                                                         .levelCount     = 1,
+                                                         .baseArrayLayer = 0,
+                                                         .layerCount     = 1,
+                                                     },
+                                             }};
+
+        return ImageWithView{
+            .image = std::move(image),
+            .view  = std::move(view),
+        };
+    };
+
     sync = std::views::iota(0, num_inflight_frames) | std::views::transform([&](auto _) { return Synchronization{graphicsContext.getDevice()}; }) |
         std::ranges::to<std::vector>();
 
-    CreatePipeline();
+    depthBuffers = std::views::iota(0, num_inflight_frames) | std::views::transform([&](auto _) { return createDepthBuffer(); }) |
+        std::ranges::to<std::vector>();
 
     commandBuffers = graphicsContext.createCommandBuffers(num_inflight_frames);
 }
@@ -350,16 +390,30 @@ void VulkanRenderer::Render() {
             commandBuffer.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
         }
 
-        const std::array colorAttachments{vk::RenderingAttachmentInfo{.imageView   = graphicsContext.getSwapchainData().imageViews[frameImageIndex],
-                                                                      .imageLayout = vk::ImageLayout::eAttachmentOptimal,
-                                                                      .loadOp      = vk::AttachmentLoadOp::eClear,
-                                                                      .storeOp     = vk::AttachmentStoreOp::eStore,
-                                                                      .clearValue  = {vk::ClearColorValue{1.0f, 1.0f, 0.0f, 1.0f}}}};
+        const std::array colorAttachments{
+            vk::RenderingAttachmentInfo{
+                .imageView   = graphicsContext.getSwapchainData().imageViews[frameImageIndex],
+                .imageLayout = vk::ImageLayout::eAttachmentOptimal,
+                .loadOp      = vk::AttachmentLoadOp::eClear,
+                .storeOp     = vk::AttachmentStoreOp::eStore,
+                .clearValue  = {vk::ClearColorValue{1.0f, 1.0f, 0.0f, 1.0f}},
+            },
+        };
+
+        const vk::RenderingAttachmentInfo depthAttachment{
+            .imageView   = depthBuffers[currentFrame].view,
+            .imageLayout = vk::ImageLayout::eAttachmentOptimal,
+            .loadOp      = vk::AttachmentLoadOp::eClear,
+            .storeOp     = vk::AttachmentStoreOp::eDontCare,
+            .clearValue  = {vk::ClearDepthStencilValue{1.0f }},
+        };
+
         commandBuffer.beginRendering({
             .renderArea           = {.offset = {}, .extent = swapChainExtent},
             .layerCount           = 1,
             .colorAttachmentCount = static_cast<uint32_t>(colorAttachments.size()),
             .pColorAttachments    = colorAttachments.data(),
+            .pDepthAttachment     = &depthAttachment,
         });
 
         const std::array viewports{
