@@ -58,4 +58,12 @@ export {
 
     template <typename T>
     using OwningPtr = T*;
+
+    template <typename ... Args>
+    struct overloaded : Args... {
+        using Args::operator()...;
+    };
+
+    template <typename T, typename ... Args>
+    concept one_of_types = (std::is_same_v<T, Args> || ...);
 }

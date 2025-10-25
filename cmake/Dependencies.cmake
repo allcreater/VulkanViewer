@@ -38,9 +38,23 @@ FetchContent_Declare(
   EXCLUDE_FROM_ALL
 )
 
-FetchContent_MakeAvailable(fastgltf glm SDL3 VulkanMemoryAllocator)
+FetchContent_Declare(
+  stb_libs
+  GIT_REPOSITORY https://github.com/nothings/stb.git
+  GIT_BRANCH     master
+  EXCLUDE_FROM_ALL
+)
+
+FetchContent_MakeAvailable(fastgltf glm SDL3 VulkanMemoryAllocator stb_libs)
 
 find_package(Vulkan REQUIRED)
+
+# STB with automatic implementation compilation
+add_library(stb_image)
+target_sources(stb_image PRIVATE ${stb_libs_SOURCE_DIR}/stb_image.h)
+target_include_directories(stb_image PUBLIC ${stb_libs_SOURCE_DIR})
+set_source_files_properties(${stb_libs_SOURCE_DIR}/stb_image.h PROPERTIES LANGUAGE CXX COMPILE_DEFINITIONS STB_IMAGE_IMPLEMENTATION)
+
 
 # Vulkan-related stuff
 # Require Vulkan version ≥ 1.3.256 (earliest version when the Vulkan module was available)
