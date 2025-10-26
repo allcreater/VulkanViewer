@@ -17,30 +17,30 @@ struct Material
 struct NodeData {
     float4x4 transform;
 }
-
+*/
 struct Scene
 {
-    StructuredBuffer<Material> materials;
-    StructuredBuffer<NodeData> nodes;
-    Texture2D textures[128];
+    //StructuredBuffer<Material> materials;
+    //StructuredBuffer<NodeData> nodes;
+    Texture2D textures[1];
+    SamplerState samplers[1];
 }
-*/
+
 
 struct Camera
 {
     float4x4 viewProjection;
 }
 
-//ParameterBlock<Scene> scene;
-[vk::push_constant]
-ConstantBuffer<Camera> camera;
+ParameterBlock<Scene> scene;
+[vk::push_constant] ConstantBuffer<Camera> camera;
 //SamplerState samplerState;
 
 struct VOut
 {
     float4 position : SV_Position;
-    float3 normal;
-    float2 uv;
+    float3 normal   : NORMAL;
+    float2 uv       : TEXCOORD;
 }
 
 [shader("vertex")]
@@ -55,10 +55,10 @@ VOut vertexMain(int instanceId: SV_InstanceID, Vertex input)
 }
 
 [shader("fragment")]
-float4 fragmentMain(int instanceId: SV_InstanceID, VOut input) : SV_Target
+float4 fragmentMain(VOut input, int instanceId: SV_InstanceID) : SV_Target
 {
-    //let texture = scene.textures[scene.materials[instanceId].albedoTextureIndex];
-    //let color = texture.Sample(samplerState, input.uv);
-    let color = float4(input.normal * 0.5 + 0.5, 1.0);
+    let texture = scene.textures[0];//[scene.materials[instanceId].albedoTextureIndex];
+    let color = texture.Sample(scene.samplers[0], input.uv);
+    //let color = float4(input.normal * 0.5 + 0.5, 1.0);
     return color;
 }

@@ -11,22 +11,31 @@ import std;
 import fastgltf;
 
 import utils.core;
+import utils.image_loader;
 import :vulkan.context;
 
 struct Synchronization {
     explicit Synchronization(const vk::raii::Device& device)
         : imageAvailable{device, vk::SemaphoreCreateInfo{}}
-        , rederFinished{device, vk::SemaphoreCreateInfo{}}
+        , renderFinished{device, vk::SemaphoreCreateInfo{}}
         , inFlightFence{device, {.flags = vk::FenceCreateFlagBits::eSignaled}} {}
 
     vk::raii::Semaphore imageAvailable;
-    vk::raii::Semaphore rederFinished;
+    vk::raii::Semaphore renderFinished;
     vk::raii::Fence     inFlightFence;
 };
 
 struct ImageWithView {
     ResourceFactory::Handle<vk::Image> image;
     vk::raii::ImageView                view;
+};
+
+// TODO: it seems almost all fields should be shared (i.e. use handles)
+struct Model {
+    ResourceFactory::Handle<vk::Buffer> vertexBuffer, indexBuffer;
+    std::vector<ImageWithView> images;
+    std::vector<vk::raii::Sampler> samplers;
+    vk::raii::DescriptorSet descriptorSet {nullptr};
 };
 
 export class VulkanRenderer final {
@@ -45,8 +54,11 @@ private:
     VulkanGraphicsContext               graphicsContext;
     vk::raii::ShaderModule              shaderModule{nullptr};
     vk::raii::PipelineLayout            pipelineLayout{nullptr};
+    vk::raii::DescriptorSetLayout       descriptorSetLayout{nullptr};
     vk::raii::Pipeline                  trianglePipeline{nullptr};
-    ResourceFactory::Handle<vk::Buffer> vertexBuffer, indexBuffer;
+    vk::raii::DescriptorPool            descriptorPool{nullptr};
+
+    std::optional<Model>                model;
 
     // vk::raii::CommandPool commandPool;
     std::vector<vk::raii::CommandBuffer> commandBuffers;
@@ -151,6 +163,29 @@ void VulkanRenderer::CreatePipeline() {
         .patchControlPoints = 0,
     };
 
+    const auto  swapChainExtent = graphicsContext.getExtent();
+    const vk::Viewport viewport{
+        .x        = 0.0f,
+        .y        = 0.0f,
+        .width    = static_cast<float>(swapChainExtent.width),
+        .height   = static_cast<float>(swapChainExtent.height),
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f,
+    };
+
+    const vk::Rect2D scissor{
+        .offset = {0, 0},
+        .extent = swapChainExtent,
+    };
+
+    const vk::PipelineViewportStateCreateInfo viewportState{
+        .flags         = {},
+        .viewportCount = 1,
+        .pViewports    = &viewport,
+        .scissorCount  = 1,
+        .pScissors     = &scissor,
+    };
+
     vk::PipelineRasterizationStateCreateInfo rasterizationState{
         .flags                   = {},
         .depthClampEnable        = vk::False,
@@ -175,19 +210,6 @@ void VulkanRenderer::CreatePipeline() {
         .alphaToOneEnable      = vk::False,
     };
 
-    // const vk::PipelineDepthStencilStateCreateInfo depthStencilState{
-    //	.flags                 = {},
-    //	.depthTestEnable       = vk::False,
-    //	.depthWriteEnable      = vk::False,
-    //	.depthCompareOp        = vk::CompareOp::eAlways,
-    //	.depthBoundsTestEnable = {},
-    //	.stencilTestEnable     = {},
-    //	.front                 = {},
-    //	.back                  = {},
-    //	.minDepthBounds        = {},
-    //	.maxDepthBounds        = {},
-    // };
-
     constexpr std::array<vk::DynamicState, 2> dynamicStates{
         vk::DynamicState::eViewport, vk::DynamicState::eScissor,
         // vk::DynamicState::eViewportWithCount,
@@ -199,7 +221,7 @@ void VulkanRenderer::CreatePipeline() {
         .pDynamicStates    = dynamicStates.data(),
     };
 
-    const std::array<vk::PipelineColorBlendAttachmentState, 1> colorBlendAttachments{
+    const std::array colorBlendAttachments{
         vk::PipelineColorBlendAttachmentState{
             .blendEnable         = vk::False,
             .srcColorBlendFactor = vk::BlendFactor::eOne,
@@ -213,7 +235,7 @@ void VulkanRenderer::CreatePipeline() {
         },
     };
 
-    const vk::PipelineDepthStencilStateCreateInfo depthStencilState{
+    constexpr vk::PipelineDepthStencilStateCreateInfo depthStencilState{
         .depthTestEnable       = true,
         .depthWriteEnable      = true,
         .depthCompareOp        = vk::CompareOp::eLess,
@@ -234,26 +256,33 @@ void VulkanRenderer::CreatePipeline() {
         .blendConstants  = std::array{0.0f, 0.0f, 0.0f, 0.0f},
     };
 
-    // std::array bindings{
-    //     vk::DescriptorSetLayoutBinding{
-    //         .binding            = 0,
-    //         .descriptorType     = vk::DescriptorType::eCombinedImageSampler,
-    //         .descriptorCount    = 1,
-    //         .stageFlags         = vk::ShaderStageFlagBits::eFragment,
-    //         .pImmutableSamplers = nullptr,
-    //     },
-    // };
-    //
-    // vk::DescriptorSetLayoutCreateInfo descriptorLayoutCreateInfo{
-    //     .flags        = {},
-    //     .bindingCount = bindings.size(),
-    //     .pBindings    = bindings.data(),
-    // };
-    //
-    // auto setLayout = device.createDescriptorSetLayout(descriptorLayoutCreateInfo);
-    // const std::array setLayouts{
-    //     *setLayout,
-    // };
+    std::array bindings{
+        vk::DescriptorSetLayoutBinding{
+            .binding            = 0,
+            .descriptorType     = vk::DescriptorType::eSampledImage,
+            .descriptorCount    = 1,
+            .stageFlags         = vk::ShaderStageFlagBits::eFragment,
+            .pImmutableSamplers = nullptr,
+        },
+        vk::DescriptorSetLayoutBinding{
+            .binding            = 1,
+            .descriptorType     = vk::DescriptorType::eSampler,
+            .descriptorCount    = 1,
+            .stageFlags         = vk::ShaderStageFlagBits::eFragment,
+            .pImmutableSamplers = nullptr,
+        },
+    };
+
+    vk::DescriptorSetLayoutCreateInfo descriptorLayoutCreateInfo{
+        .flags        = {},
+        .bindingCount = bindings.size(),
+        .pBindings    = bindings.data(),
+    };
+
+    descriptorSetLayout = device.createDescriptorSetLayout(descriptorLayoutCreateInfo);
+    const std::array setLayouts{
+        *descriptorSetLayout,
+    };
 
     constexpr std::array pushConstantsRanges{
         vk::PushConstantRange{
@@ -265,8 +294,8 @@ void VulkanRenderer::CreatePipeline() {
 
     const vk::PipelineLayoutCreateInfo layoutCreateInfo{
         .flags                  = {},
-        // .setLayoutCount         = setLayouts.size(),
-        // .pSetLayouts            = setLayouts.data(),
+        .setLayoutCount         = setLayouts.size(),
+        .pSetLayouts            = setLayouts.data(),
         .pushConstantRangeCount = pushConstantsRanges.size(),
         .pPushConstantRanges    = pushConstantsRanges.data(),
     };
@@ -282,7 +311,7 @@ void VulkanRenderer::CreatePipeline() {
                                       .pVertexInputState   = &vertexInputState,
                                       .pInputAssemblyState = &inputAssemblyState,
                                       .pTessellationState  = &tesselationState,
-                                      .pViewportState      = nullptr,
+                                      .pViewportState      = &viewportState,
                                       .pRasterizationState = &rasterizationState,
                                       .pMultisampleState   = &multisampleState,
                                       .pDepthStencilState  = &depthStencilState,
@@ -302,7 +331,7 @@ void VulkanRenderer::CreatePipeline() {
     trianglePipeline = device.createGraphicsPipeline({nullptr}, createInfo.get());
 }
 
-VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext) : graphicsContext{std::move(_graphicsContext)}, vertexBuffer{nullptr} {
+VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext) : graphicsContext{std::move(_graphicsContext)} {
     CreatePipeline();
 
     const auto createDepthBuffer = [&] -> ImageWithView{
@@ -344,6 +373,22 @@ VulkanRenderer::VulkanRenderer(VulkanGraphicsContext&& _graphicsContext) : graph
             .view  = std::move(view),
         };
     };
+
+
+    descriptorPool = [&] {
+        std::array descritporPoolSizes {
+            vk::DescriptorPoolSize{.type = vk::DescriptorType::eSampledImage, .descriptorCount = 128},
+            vk::DescriptorPoolSize{.type = vk::DescriptorType::eCombinedImageSampler, .descriptorCount = 128},
+            vk::DescriptorPoolSize{.type = vk::DescriptorType::eUniformBuffer, .descriptorCount = 128},
+        };
+
+        return graphicsContext.getDevice().createDescriptorPool(vk::DescriptorPoolCreateInfo{
+            .flags         = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
+            .maxSets       = 128,
+            .poolSizeCount = descritporPoolSizes.size(),
+            .pPoolSizes    = descritporPoolSizes.data(),
+        });
+    }();
 
     sync = std::views::iota(0, num_inflight_frames) | std::views::transform([&](auto _) { return Synchronization{graphicsContext.getDevice()}; }) |
         std::ranges::to<std::vector>();
@@ -396,7 +441,7 @@ void VulkanRenderer::Render() {
                 .imageLayout = vk::ImageLayout::eAttachmentOptimal,
                 .loadOp      = vk::AttachmentLoadOp::eClear,
                 .storeOp     = vk::AttachmentStoreOp::eStore,
-                .clearValue  = {vk::ClearColorValue{1.0f, 1.0f, 0.0f, 1.0f}},
+                .clearValue  = {vk::ClearColorValue{0.0f, 0.0f, 0.0f, 1.0f}},
             },
         };
 
@@ -439,10 +484,11 @@ void VulkanRenderer::Render() {
 
         commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, trianglePipeline);
 
-        if (vertexBuffer && indexBuffer) {
+        if (model) {
+            auto& [vertexBuffer, indexBuffer, images_, samplers_, descriptorSet] = *model;
             commandBuffer.bindVertexBuffers(0, *vertexBuffer, {0});
             commandBuffer.bindIndexBuffer(*indexBuffer, 0, vk::IndexType::eUint32);
-
+            commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, {descriptorSet}, {});
 
             auto proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float) swapChainExtent.height, 0.1f, 100.0f);
             auto view = glm::lookAt(glm::vec3(20.0f, 20.0f, 20.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
@@ -477,7 +523,7 @@ void VulkanRenderer::Render() {
     }
 
     const std::array<vk::Semaphore, 1>          semaphoresForWait   = {frameSync.imageAvailable};
-    const std::array<vk::Semaphore, 1>          semaphoresForSignal = {frameSync.rederFinished};
+    const std::array<vk::Semaphore, 1>          semaphoresForSignal = {frameSync.renderFinished};
     const std::array<vk::PipelineStageFlags, 1> waitStages          = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
     const vk::SubmitInfo                        submitInfo{
                                .waitSemaphoreCount   = static_cast<uint32_t>(semaphoresForWait.size()),
@@ -493,7 +539,7 @@ void VulkanRenderer::Render() {
 
     const vk::PresentInfoKHR presentInfo{
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores    = &*frameSync.rederFinished,
+        .pWaitSemaphores    = &*frameSync.renderFinished,
         .swapchainCount     = 1,
         .pSwapchains        = &*swapchain,
         .pImageIndices      = &frameImageIndex,
@@ -528,6 +574,125 @@ auto writeRangeToMemory(R&& dataRange, std::span<std::byte> destMemory) {
 //
 // }
 
+auto loadAssetImage(const fastgltf::Image& image) {
+    auto* data = std::get_if<fastgltf::sources::Array>(&image.data);
+    assert(data);
+
+    return loadImageAsRgba<const std::uint8_t>(std::span{reinterpret_cast<const std::uint8_t*>(data->bytes.data()), data->bytes.size()});
+}
+
+ImageWithView createTextureFromImage(image2d_rgba<const std::uint8_t> imageData, VulkanGraphicsContext& graphicsContext) {
+        auto image = graphicsContext.getResourceFactory().CreateImage(vk::ImageCreateInfo{
+            .flags                 = {},
+            .imageType             = vk::ImageType::e2D,
+            .format                = vk::Format::eR8G8B8A8Srgb,
+            .extent                = vk::Extent3D{imageData.extent(1), imageData.extent(0), 1},
+            .mipLevels             = 1,
+            .arrayLayers           = 1,
+            .samples               = vk::SampleCountFlagBits::e1,
+            .tiling                = vk::ImageTiling::eOptimal,
+            .usage                 = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+            .sharingMode           = vk::SharingMode::eExclusive,
+            .queueFamilyIndexCount = {},
+            .pQueueFamilyIndices   = {},
+            .initialLayout         = vk::ImageLayout::eUndefined,
+        }, CasualUsage::Auto);
+
+        auto view = vk::raii::ImageView{graphicsContext.getDevice(),
+                                             vk::ImageViewCreateInfo{
+                                                 .flags      = {},
+                                                 .image      = *image,
+                                                 .viewType   = vk::ImageViewType::e2D,
+                                                 .format     = vk::Format::eR8G8B8A8Srgb,
+                                                 .components = {},
+                                                 .subresourceRange =
+                                                     vk::ImageSubresourceRange{
+                                                         .aspectMask     = vk::ImageAspectFlagBits::eColor,
+                                                         .baseMipLevel   = 0,
+                                                         .levelCount     = 1,
+                                                         .baseArrayLayer = 0,
+                                                         .layerCount     = 1,
+                                                     },
+                                             }};
+
+        {
+            auto transferBuffer = graphicsContext.getResourceFactory().CreateBuffer({
+               .flags       = {},
+               .size        = imageData.size(),
+               .usage       = vk::BufferUsageFlagBits::eTransferSrc,
+               .sharingMode = vk::SharingMode::eExclusive
+            }, CasualUsage::AutoMapped);
+            std::memcpy(transferBuffer.mappedMemory().data(), imageData.data_handle().get(), imageData.size());
+
+
+            vk::raii::CommandBuffer commandBuffer = std::move(graphicsContext.createCommandBuffers(1)[0]);
+            vk::BufferImageCopy2 copyRegion {
+                .bufferOffset      = 0,
+                .bufferRowLength   = 0,//imageData.size() / imageData.extent(0)/4,
+                .bufferImageHeight = 0,//imageData.extent(0),
+                .imageSubresource  = {
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                    .mipLevel = 0,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
+                .imageOffset       = {.x =  0, .y = 0, .z = 0},
+                .imageExtent       = {.width = imageData.extent(1), .height = imageData.extent(0), .depth = 1},
+            };
+
+            commandBuffer.begin({});
+            {
+                const vk::ImageMemoryBarrier2 barrier{
+                    .srcStageMask  = vk::PipelineStageFlagBits2::eTopOfPipe,
+                    .srcAccessMask = vk::AccessFlagBits2::eNone,
+                    .dstStageMask  = vk::PipelineStageFlagBits2::eTransfer,
+                    .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+                    .oldLayout     = vk::ImageLayout::eUndefined,
+                    .newLayout     = vk::ImageLayout::eTransferDstOptimal,
+                    .image         = *image,
+                    .subresourceRange =
+                        {.aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
+                };
+                commandBuffer.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
+            }
+
+            commandBuffer.copyBufferToImage2({
+                .srcBuffer = *transferBuffer,
+                .dstImage = *image,
+                .dstImageLayout = vk::ImageLayout::eTransferDstOptimal,
+                .regionCount = 1,
+                .pRegions = &copyRegion,
+            });
+
+            {
+                const vk::ImageMemoryBarrier2 barrier{
+                    .srcStageMask  = vk::PipelineStageFlagBits2::eTransfer,
+                    .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+                    .dstStageMask  = vk::PipelineStageFlagBits2::eFragmentShader,
+                    .dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+                    .oldLayout     = vk::ImageLayout::eTransferDstOptimal,
+                    .newLayout     = vk::ImageLayout::eShaderReadOnlyOptimal,
+                    .image         = *image,
+                    .subresourceRange =
+                        {.aspectMask = vk::ImageAspectFlagBits::eColor, .baseMipLevel = 0, .levelCount = 1, .baseArrayLayer = 0, .layerCount = 1},
+                };
+                commandBuffer.pipelineBarrier2(vk::DependencyInfo().setImageMemoryBarriers(barrier));
+            }
+
+            commandBuffer.end();
+            graphicsContext.getGraphicsQueue().submit(vk::SubmitInfo{
+                .commandBufferCount = 1,
+                .pCommandBuffers    = &*commandBuffer,
+            });
+            graphicsContext.getGraphicsQueue().waitIdle();
+        }
+
+        return ImageWithView{
+            .image = std::move(image),
+            .view  = std::move(view),
+        };
+}
+
 void VulkanRenderer::LoadModel(const std::filesystem::path& path) {
     fastgltf::GltfFileStream stream{path};
 
@@ -543,6 +708,7 @@ void VulkanRenderer::LoadModel(const std::filesystem::path& path) {
 
     const auto& primitive = result->meshes[0].primitives[0];
 
+    Model resultModel;
     // vertex
     {
         auto positions = iterateAccessor<fastgltf::math::fvec3>(result.get(), primitive, "POSITION");
@@ -551,7 +717,6 @@ void VulkanRenderer::LoadModel(const std::filesystem::path& path) {
         auto interleavedVertexAttribs = std::views::zip(positions, normals, uvs) | std::views::transform([](auto&& tuple) {
             return std::make_from_tuple<Vertex>(tuple);
         });
-
 
         auto buffer = graphicsContext.getResourceFactory().CreateBuffer(
             {
@@ -565,7 +730,7 @@ void VulkanRenderer::LoadModel(const std::filesystem::path& path) {
         writeRangeToMemory<Vertex>(interleavedVertexAttribs, buffer.mappedMemory());
         std::span target {reinterpret_cast<Vertex*>(buffer.mappedMemory().data()), buffer.mappedMemory().size_bytes() / sizeof(Vertex)};
 
-        vertexBuffer = std::move(buffer);
+        resultModel.vertexBuffer = std::move(buffer);
     }
 
     // indices
@@ -584,6 +749,62 @@ void VulkanRenderer::LoadModel(const std::filesystem::path& path) {
 
         std::span target {reinterpret_cast<uint32_t*>(buffer.mappedMemory().data()), buffer.mappedMemory().size_bytes() / sizeof(uint32_t)};
 
-        indexBuffer = std::move(buffer);
+        resultModel.indexBuffer = std::move(buffer);
     }
+
+    resultModel.images.push_back(createTextureFromImage(loadAssetImage(result.get().images[0]), graphicsContext));
+    resultModel.samplers.push_back(
+        graphicsContext.getDevice().createSampler(vk::SamplerCreateInfo{})
+    );
+
+    resultModel.descriptorSet = std::move(graphicsContext.getDevice().allocateDescriptorSets(vk::DescriptorSetAllocateInfo{
+        .descriptorPool = descriptorPool,
+        .descriptorSetCount =  1,
+        .pSetLayouts = &*descriptorSetLayout,
+    })[0]);
+
+    {
+        vk::DescriptorImageInfo descriptorImageInfo{
+            .sampler     = nullptr,
+            .imageView   = resultModel.images[0].view,
+            .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+        };
+        vk::DescriptorImageInfo descriptorSamplerInfo{
+            .sampler     = resultModel.samplers[0],
+            .imageView   = nullptr,
+            .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+        };
+
+        graphicsContext.getDevice().updateDescriptorSets(
+            {
+                vk::WriteDescriptorSet{
+                    .dstSet = resultModel.descriptorSet,
+                    .dstBinding = 0,
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eSampledImage,
+                    .pImageInfo = &descriptorImageInfo,
+                    .pBufferInfo = nullptr,
+                    .pTexelBufferView = nullptr,
+
+                },
+                vk::WriteDescriptorSet{
+                   .dstSet = resultModel.descriptorSet,
+                   .dstBinding = 1,
+                   .dstArrayElement = 0,
+                   .descriptorCount = 1,
+                   .descriptorType = vk::DescriptorType::eSampler,
+                   .pImageInfo = &descriptorSamplerInfo,
+                   .pBufferInfo = nullptr,
+                   .pTexelBufferView = nullptr,
+
+               },
+            },
+            {
+            }
+        );
+    }
+
+
+    model = std::move(resultModel);
 }
